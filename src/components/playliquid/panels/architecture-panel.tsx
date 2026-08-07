@@ -18,12 +18,17 @@ import {
   Scale,
   Workflow,
   ArrowDown,
+  Shield,
+  CheckCircle2,
+  Circle,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const primitiveIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   Package: Boxes,
   Specification: FileJson,
+  Contract: Plug,
   "Interface / Contract": Plug,
   Entity: Box,
   "World Project": Globe,
@@ -31,6 +36,7 @@ const primitiveIcons: Record<string, React.ComponentType<{ className?: string }>
   Kernel: Cpu,
   "Runtime Adapter": MonitorSmartphone,
   "World Node": Server,
+  "World Service": Shield,
 };
 
 export function ArchitecturePanel() {
@@ -63,38 +69,54 @@ export function ArchitecturePanel() {
         </CardHeader>
         <CardContent>
           <div className="rounded-lg border border-border bg-background/40 p-4 grid-bg">
-            <pre className="font-mono text-[11px] leading-relaxed text-muted-foreground sm:text-xs whitespace-pre">
+            <pre className="font-mono text-[10px] leading-relaxed text-muted-foreground sm:text-[11px] whitespace-pre">
 {`                    PLAYLIQUID OS
                          │
-       ┌─────────────────┼──────────────────┐
-       │                 │                  │
-  SPECIFICATION       PACKAGES          WORLD PROJECT
-       │                 │                  │
-       └─────────────────┼──────────────────┘
+        ┌────────────────┼────────────────┐
+        │                │                │
+    SPECIFICATION     REGISTRY        PROJECTS
+        │                │                │
+    AI Architect     Packages        Git-like World
+    Multimodal       Versions        Contributions
+        │             Contracts       Policies
+        │                │                │
+        └────────────────┼────────────────┘
                          │
                     COMPOSITION
+                  Dependency · Spatial ·
+                  Capability · Event Graphs
                          │
-                    WORLD BUILD
+                       BUILD
                          │
-                      ENTITIES
+                  Immutable Manifest
                          │
-                       KERNEL
+                    WORLD NODE
                          │
-                   RUNTIME ADAPTER
+        ┌────────────────┼─────────────────┐
+        │                │                 │
+      KERNEL          SERVICES          RUNTIME
+   Scheduler        Multiplayer       Entity Runtime
+   Event Bus        Streaming         Rendering Adapter
+   Entities         Persistence       Audio Adapter
+   Networking       Ads               Input Adapter
+   Replication      Voice             Sensor Adapter
+   Capabilities     Identity
+   Spatial          Analytics
+        │
+        └──────────────────────────────────┘
                          │
-                      WORLD NODE`}
+                  USER'S WORLD`}
             </pre>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Every future capability — multiplayer, VR, smell, federation, photorealism — plugs into this
-            graph <span className="text-foreground">without changing what a Package, World, Entity, Specification, Build, or Runtime means.</span>
+            10 frozen primitives. The OS provides <span className="text-foreground">multiplayer, streaming, persistence, capability enforcement, and platform services</span> — the user's LLM only implements <span className="text-foreground">packages</span> against those contracts.
           </p>
         </CardContent>
       </Card>
 
-      {/* The 9 primitives */}
+      {/* The 10 primitives */}
       <div>
-        <h3 className="mb-3 text-sm font-medium text-muted-foreground">The 9 Permanent Contracts</h3>
+        <h3 className="mb-3 text-sm font-medium text-muted-foreground">The 10 Permanent Contracts</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {arch.primitives.map((p) => {
             const Icon = primitiveIcons[p.name] ?? Box;
@@ -168,6 +190,95 @@ export function ArchitecturePanel() {
           ))}
         </CardContent>
       </Card>
+
+      {/* OS substrate vs LLM implementation */}
+      {arch.substrate && (
+        <Card className="border-border bg-card/40">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Shield className="h-4 w-4 text-primary" />
+              The Critical Distinction: OS Substrate vs LLM Implementation
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] p-4">
+                <h4 className="mb-2 text-xs font-semibold text-emerald-400">PlayLiquid OS provides</h4>
+                <ul className="space-y-1 text-xs text-foreground/80">
+                  {arch.substrate.osProvides.map((x) => (
+                    <li key={x} className="flex items-start gap-1.5">
+                      <span className="text-emerald-400">▸</span> {x}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-md border border-violet-500/20 bg-violet-500/[0.04] p-4">
+                <h4 className="mb-2 text-xs font-semibold text-violet-400">User's LLM implements</h4>
+                <ul className="space-y-1 text-xs text-foreground/80">
+                  {arch.substrate.llmImplements.map((x) => (
+                    <li key={x} className="flex items-start gap-1.5">
+                      <span className="text-violet-400">▸</span> {x}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Kernel services */}
+      {arch.kernelServices && (
+        <div>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Kernel Service Contracts (OS substrate)</h3>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {arch.kernelServices.map((s) => (
+              <div key={s.contract} className="flex items-start gap-3 rounded-md border border-border/60 bg-background/40 p-3">
+                <Cpu className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold">{s.name}</span>
+                    <Badge variant="outline" className="font-mono text-[9px] text-primary/70">{s.contract}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{s.role}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Roadmap */}
+      {arch.roadmap && (
+        <div>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Six-Stage Roadmap</h3>
+          <Card className="border-border bg-card/40">
+            <CardContent className="divide-y divide-border p-0">
+              {arch.roadmap.map((r) => {
+                const Icon = r.status === "done" ? CheckCircle2 : r.status === "in-progress" || r.status === "partial" ? Loader2 : Circle;
+                const color = r.status === "done" ? "text-emerald-400" : r.status === "in-progress" || r.status === "partial" ? "text-amber-400" : "text-muted-foreground";
+                return (
+                  <div key={r.stage} className="flex items-start gap-3 p-3">
+                    <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${color} ${r.status === "in-progress" || r.status === "partial" ? "animate-spin" : ""}`} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="font-mono text-[9px]">Stage {r.stage}</Badge>
+                        <span className="text-xs font-medium">{r.name}</span>
+                        <Badge variant="outline" className={`ml-auto text-[9px] uppercase ${
+                          r.status === "done" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" :
+                          r.status === "in-progress" || r.status === "partial" ? "border-amber-500/30 bg-amber-500/10 text-amber-300" :
+                          "border-border text-muted-foreground"
+                        }`}>{r.status}</Badge>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">{r.detail}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Extension table */}
       <div>

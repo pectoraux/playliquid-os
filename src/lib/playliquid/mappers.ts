@@ -252,3 +252,140 @@ export function mapGenerationRequest(g: {
     createdAt: g.createdAt.toISOString(),
   };
 }
+
+// ── World Service mappers ─────────────────────────────────────────
+import type {
+  WorldServiceRecord,
+  WorldServiceBindingRecord,
+  CapabilityPolicyRecord,
+  SpatialSlotRecord,
+  ContributionRecord,
+} from "./types";
+
+export function mapWorldService(s: {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  category: string;
+  contract: string;
+  provider: string;
+  status: string;
+  config: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): WorldServiceRecord {
+  return {
+    id: s.id,
+    name: s.name,
+    displayName: s.displayName,
+    description: s.description,
+    category: s.category,
+    contract: safeParse(s.contract, {}),
+    provider: s.provider,
+    status: s.status,
+    config: safeParse(s.config, {}),
+    createdAt: s.createdAt.toISOString(),
+    updatedAt: s.updatedAt.toISOString(),
+  };
+}
+
+export function mapWorldServiceBinding(b: {
+  id: string;
+  worldProjectId: string;
+  worldServiceId: string;
+  worldService?: Parameters<typeof mapWorldService>[0] | null;
+  enabled: boolean;
+  config: string;
+  createdAt: Date;
+}): WorldServiceBindingRecord {
+  return {
+    id: b.id,
+    worldProjectId: b.worldProjectId,
+    worldServiceId: b.worldServiceId,
+    worldService: b.worldService ? mapWorldService(b.worldService) : undefined,
+    enabled: b.enabled,
+    config: safeParse(b.config, {}),
+    createdAt: b.createdAt.toISOString(),
+  };
+}
+
+export function mapCapabilityPolicy(p: {
+  id: string;
+  worldProjectId: string;
+  layer: string;
+  zoneName: string | null;
+  experienceName: string | null;
+  capability: string;
+  rules: string;
+  priority: number;
+  createdAt: Date;
+}): CapabilityPolicyRecord {
+  return {
+    id: p.id,
+    worldProjectId: p.worldProjectId,
+    layer: p.layer as CapabilityPolicyRecord["layer"],
+    zoneName: p.zoneName,
+    experienceName: p.experienceName,
+    capability: p.capability,
+    rules: safeParse(p.rules, []),
+    priority: p.priority,
+    createdAt: p.createdAt.toISOString(),
+  };
+}
+
+export function mapSpatialSlot(s: {
+  id: string;
+  worldProjectId: string;
+  name: string;
+  displayName: string;
+  slotType: string;
+  bounds: string;
+  acceptedFamilies: string;
+  capacity: number | null;
+  createdAt: Date;
+}): SpatialSlotRecord {
+  return {
+    id: s.id,
+    worldProjectId: s.worldProjectId,
+    name: s.name,
+    displayName: s.displayName,
+    slotType: s.slotType,
+    bounds: safeParse(s.bounds, { x: 0, y: 0, z: 0, w: 0, h: 0, d: 0 }),
+    acceptedFamilies: safeParse(s.acceptedFamilies, []),
+    capacity: s.capacity,
+    createdAt: s.createdAt.toISOString(),
+  };
+}
+
+export function mapContribution(c: {
+  id: string;
+  worldProjectId: string;
+  packageId: string | null;
+  package?: Parameters<typeof mapPackage>[0] | null;
+  contributorName: string;
+  title: string;
+  description: string;
+  targetSlot: string | null;
+  status: string;
+  reviewNote: string | null;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  createdAt: Date;
+}): ContributionRecord {
+  return {
+    id: c.id,
+    worldProjectId: c.worldProjectId,
+    packageId: c.packageId,
+    package: c.package ? mapPackage(c.package) : undefined,
+    contributorName: c.contributorName,
+    title: c.title,
+    description: c.description,
+    targetSlot: c.targetSlot,
+    status: c.status as ContributionRecord["status"],
+    reviewNote: c.reviewNote,
+    reviewedBy: c.reviewedBy,
+    reviewedAt: c.reviewedAt ? c.reviewedAt.toISOString() : null,
+    createdAt: c.createdAt.toISOString(),
+  };
+}

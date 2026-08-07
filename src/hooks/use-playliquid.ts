@@ -242,3 +242,80 @@ export function useGenerate() {
     },
   });
 }
+
+// ── World Services ────────────────────────────────────────────────
+export function useWorldServices() {
+  return useQuery({
+    queryKey: ["world-services"],
+    queryFn: () => api.get<import("@/lib/playliquid/types").WorldServiceRecord[]>("/api/world-services"),
+    staleTime: 30000,
+  });
+}
+
+// ── Kernel services ───────────────────────────────────────────────
+export function useKernelServices() {
+  return useQuery({
+    queryKey: ["kernel-services"],
+    queryFn: () => api.get<import("@/lib/playliquid/types").WorldServiceRecord[]>("/api/kernel/services"),
+    staleTime: 30000,
+  });
+}
+
+// ── Capability negotiation ────────────────────────────────────────
+export function useNegotiateCapabilities() {
+  return useMutation({
+    mutationFn: (body: { packageId: string; worldProjectId: string; zoneName?: string; experienceName?: string }) =>
+      api.post<{
+        package: import("@/lib/playliquid/types").PackageRecord;
+        declared: string[];
+        effective: import("@/lib/playliquid/types").EffectiveCapability[];
+      }>("/api/capabilities/negotiate", body),
+  });
+}
+
+// ── Reuse-first ───────────────────────────────────────────────────
+export function useReuseFirst() {
+  return useMutation({
+    mutationFn: (body: { naturalLanguage: string; canonical: Record<string, unknown>; worldProjectId?: string }) =>
+      api.post<import("@/lib/playliquid/types").ReuseFirstResult>("/api/reuse", body),
+  });
+}
+
+// ── Contributions ─────────────────────────────────────────────────
+export function useContributions(projectId?: string, status?: string) {
+  const params = new URLSearchParams();
+  if (projectId) params.set("projectId", projectId);
+  if (status) params.set("status", status);
+  const qs = params.toString();
+  return useQuery({
+    queryKey: ["contributions", projectId, status],
+    queryFn: () => api.get<import("@/lib/playliquid/types").ContributionRecord[]>(`/api/contributions${qs ? `?${qs}` : ""}`),
+    refetchInterval: 8000,
+  });
+}
+
+export function useMergeContribution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<import("@/lib/playliquid/types").ContributionRecord>(`/api/contributions/${id}/merge`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contributions"] }),
+  });
+}
+
+export function useRejectContribution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { id: string; note?: string }) =>
+      api.post<import("@/lib/playliquid/types").ContributionRecord>(`/api/contributions/${body.id}/reject`, { note: body.note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contributions"] }),
+  });
+}
+
+// ── Spatial slots ─────────────────────────────────────────────────
+export function useSpatialSlots(projectId?: string) {
+  const qs = projectId ? `?projectId=${projectId}` : "";
+  return useQuery({
+    queryKey: ["spatial-slots", projectId],
+    queryFn: () => api.get<import("@/lib/playliquid/types").SpatialSlotRecord[]>(`/api/spatial-slots${qs}`),
+  });
+}

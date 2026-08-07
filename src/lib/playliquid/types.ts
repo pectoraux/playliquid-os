@@ -199,6 +199,12 @@ export interface ArchitectureManifest {
   pipelines: Array<{ name: string; stages: string[] }>;
   laws: string[];
   extensionTable: Array<{ capability: string; extensionPoint: string }>;
+  substrate?: {
+    osProvides: string[];
+    llmImplements: string[];
+  };
+  kernelServices?: Array<{ name: string; contract: string; role: string }>;
+  roadmap?: Array<{ stage: string; name: string; status: string; detail: string }>;
 }
 
 // ── Pipeline: NL → Specification → Prompt ────────────────────────
@@ -224,3 +230,105 @@ export type ReusePolicy =
   | "reuse-infrastructure-only"
   | "reuse-none"
   | "auto";
+
+// ── Primitive #10: World Service ──────────────────────────────────
+export interface WorldServiceRecord {
+  id: string;
+  name: string;
+  displayName: string;
+  description: string;
+  category: string;
+  contract: Record<string, unknown>;
+  provider: string;
+  status: string;
+  config: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorldServiceBindingRecord {
+  id: string;
+  worldProjectId: string;
+  worldServiceId: string;
+  worldService?: WorldServiceRecord;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  createdAt: string;
+}
+
+// ── Multi-layer capability negotiation (Superman example) ─────────
+export type CapabilityAction = "allow" | "deny" | "limit";
+
+export interface CapabilityRule {
+  packageFamily?: string; // e.g. "avatar" — applies to all avatars
+  package?: string; // specific package name, e.g. "@playliquid/avatars/superman"
+  action: CapabilityAction;
+  params?: Record<string, unknown>; // e.g. { maxAltitude: 100 } for "limit"
+  reason?: string;
+}
+
+export interface CapabilityPolicyRecord {
+  id: string;
+  worldProjectId: string;
+  layer: "world" | "zone" | "experience";
+  zoneName?: string | null;
+  experienceName?: string | null;
+  capability: string;
+  rules: CapabilityRule[];
+  priority: number;
+  createdAt: string;
+}
+
+// The result of multi-layer negotiation
+export interface EffectiveCapability {
+  capability: string;
+  granted: boolean;
+  action: CapabilityAction;
+  limitedBy?: { layer: string; rule: CapabilityRule };
+  layers: Array<{ layer: string; action: CapabilityAction; rule?: CapabilityRule }>;
+  // the full trace of how the kernel arrived at this result
+}
+
+// ── Spatial slots (spatial attachment API) ────────────────────────
+export interface SpatialSlotRecord {
+  id: string;
+  worldProjectId: string;
+  name: string;
+  displayName: string;
+  slotType: string;
+  bounds: { x: number; y: number; z: number; w: number; h: number; d: number };
+  acceptedFamilies: string[];
+  capacity?: number | null;
+  createdAt: string;
+}
+
+// ── Contributions (World Projects as GitHub for Worlds) ───────────
+export interface ContributionRecord {
+  id: string;
+  worldProjectId: string;
+  packageId?: string | null;
+  package?: PackageRecord;
+  contributorName: string;
+  title: string;
+  description: string;
+  targetSlot?: string | null;
+  status: "PENDING" | "MERGED" | "REJECTED" | "DRAFT";
+  reviewNote?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+}
+
+// ── Reuse-first generation result ─────────────────────────────────
+export interface ReuseFirstResult {
+  decomposition: Array<{
+    subSpec: Record<string, unknown>;
+    family: string;
+    action: "reuse" | "generate";
+    reusedPackage?: PackageRecord;
+    reason: string;
+  }>;
+  reusedCount: number;
+  generatedCount: number;
+  totalSubPackages: number;
+}

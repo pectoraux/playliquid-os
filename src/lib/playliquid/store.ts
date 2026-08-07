@@ -9,6 +9,9 @@ export type PanelId =
   | "build"
   | "runtime"
   | "console"
+  | "capabilities"
+  | "services"
+  | "contributions"
   | "admin";
 
 interface PlayliquidState {

@@ -11,6 +11,9 @@ import { WorldsPanel } from "@/components/playliquid/panels/worlds-panel";
 import { BuildPanel } from "@/components/playliquid/panels/build-panel";
 import { RuntimePanel } from "@/components/playliquid/panels/runtime-panel";
 import { ConsolePanel } from "@/components/playliquid/panels/console-panel";
+import { CapabilitiesPanel } from "@/components/playliquid/panels/capabilities-panel";
+import { ServicesPanel } from "@/components/playliquid/panels/services-panel";
+import { ContributionsPanel } from "@/components/playliquid/panels/contributions-panel";
 import { AdminPanel } from "@/components/playliquid/panels/admin-panel";
 import {
   Droplets,
@@ -24,17 +27,21 @@ import {
   Shield,
   LogOut,
   ChevronDown,
+  GitPullRequest,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 
 const NAV: Array<{ id: PanelId; label: string; icon: React.ComponentType<{ className?: string }>; desc: string; adminOnly?: boolean }> = [
-  { id: "architecture", label: "Architecture", icon: Boxes, desc: "The frozen 9 primitives" },
+  { id: "architecture", label: "Architecture", icon: Boxes, desc: "The frozen 10 primitives" },
   { id: "registry", label: "Registry", icon: Layers3, desc: "Packages — everything is one" },
   { id: "worlds", label: "Worlds", icon: Globe, desc: "World Projects" },
   { id: "build", label: "Build", icon: Sparkles, desc: "Compose a World Build" },
+  { id: "capabilities", label: "Capabilities", icon: Shield, desc: "Multi-layer negotiation (Superman)" },
   { id: "runtime", label: "Runtime", icon: Server, desc: "Nodes · Entities · Kernel" },
+  { id: "services", label: "Services", icon: Server, desc: "OS substrate — never LLM" },
+  { id: "contributions", label: "Contributions", icon: GitPullRequest, desc: "GitHub for Worlds" },
   { id: "console", label: "Console", icon: Terminal, desc: "Natural language → Package" },
   { id: "admin", label: "Admin", icon: Shield, desc: "Waitlist approvals", adminOnly: true },
 ];
@@ -144,7 +151,10 @@ function Console() {
           {panel === "registry" && <RegistryPanel />}
           {panel === "worlds" && <WorldsPanel />}
           {panel === "build" && <BuildPanel />}
+          {panel === "capabilities" && <CapabilitiesPanel />}
           {panel === "runtime" && <RuntimePanel />}
+          {panel === "services" && <ServicesPanel />}
+          {panel === "contributions" && <ContributionsPanel />}
           {panel === "console" && <ConsolePanel />}
           {panel === "admin" && isAdmin && <AdminPanel />}
         </main>
@@ -160,11 +170,11 @@ function Console() {
             </span>
           </div>
           <div className="flex items-center gap-3 font-mono">
-            <span>9 primitives</span>
+            <span>10 primitives</span>
             <span className="text-border">·</span>
             <span>2 pipelines</span>
             <span className="text-border">·</span>
-            <span>3 laws</span>
+            <span>4 laws</span>
             <span className="text-border">·</span>
             <span className="text-primary">nothing bypasses Package</span>
           </div>
