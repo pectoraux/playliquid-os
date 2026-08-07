@@ -473,3 +473,27 @@ Stage Summary:
 - Phase D: the world can be larger than the browser's memory. The browser only holds entities in its interest region. Cells load/unload as the player moves.
 - Phase E: the full user-owned LLM pipeline works end-to-end. PlayLiquid produces the prompt; the user takes it to their LLM; the user pastes the result back; PlayLiquid certifies it as a RuntimeArtifact and can execute it. PlayLiquid never calls an LLM.
 - 6 of 11 substrate guarantees now "partial". The OS substrate is becoming real.
+
+---
+Task ID: 12
+Agent: orchestrator (main)
+Task: Phase F — Player avatars + real multiplayer presence.
+
+Work Log:
+- createSession() now spawns an avatar entity (avatar-{sessionId}) in the authoritative state with a random spawn position + color. The avatar flows through the SSE stream like any other entity.
+- removeSession() removes the avatar + broadcasts entity.remove.
+- Avatars rendered as distinct colored circles with direction indicator + name label. Your own avatar is highlighted with a white ring + "(you)" suffix.
+- WASD/arrow key movement: keydown/keyup listeners track pressed keys; a movement loop sends move-player requests at most every 50ms.
+- /api/runtime/:buildId/move-player endpoint updates the avatar's authoritative position + direction.
+- entity.remove SSE event handling: when a player leaves, their avatar is removed from the browser's local authoritative state.
+- The HUD shows "WASD / arrows to move your avatar" when the player has a session.
+
+Verified locally:
+- Session join spawns an avatar (returns sessionId + player count).
+- move-player updates the avatar's authoritative position (returns ok: true).
+- The avatar flows through the SSE stream — other browsers see it.
+
+Stage Summary:
+- You are now IN the world, not just observing it. Open the Runtime panel in two browser tabs — both join the same world, both see each other's avatar, both see each other move in real-time via the SSE stream.
+- This is the real multiplayer milestone: two browsers, same world, see each other, move, and watch each other move — all through the authoritative Kernel + SSE replication.
+- The player's movement goes through the Kernel (move-player endpoint), which updates authoritative state and replicates to all clients. The browser doesn't own position; it reads from the SSE stream.
