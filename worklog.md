@@ -406,3 +406,38 @@ Stage Summary:
 - The RenderContext no longer leaks browser types. A Unity adapter would implement the same draw commands.
 - Imported artifacts go through ABI conformance validation before certification.
 - The Kernel owns authoritative state; packages are behavioral owners.
+
+---
+Task ID: 10
+Agent: orchestrator (main)
+Task: Phase B+C — Real Kernel + Real Multiplayer.
+
+Work Log:
+Phase B — Real Kernel:
+- Built authoritative state store (src/lib/playliquid/state-store.ts): in-memory cache per World Build, backed by DB. The Kernel owns entity state. Packages request mutations; the Kernel decides.
+- Built SSE event stream (/api/runtime/:buildId/stream): pushes state changes to all connected clients in real-time. Sends initial snapshot, then incremental updates.
+- Built real scheduler (/api/runtime/:buildId/tick): mutates authoritative state server-side (applies pending movements, advances rotations) and replicates to all clients.
+- Built state mutation API (/api/runtime/:buildId/mutate): packages call requestMovement() and setState() through this endpoint. The Kernel updates authoritative state + replicates.
+
+Phase C — Real Multiplayer:
+- Built session management (/api/runtime/:buildId/session): players join with a name, get a sessionId, see presence. Join/leave events broadcast to all connected clients.
+- Rewrote browser runtime to read from the authoritative SSE stream. The KernelContext's getState() reads from authoritative state; setState() and requestMovement() send mutations to the Kernel API.
+- Multiplayer indicator: shows connected players, connection status, tick count. A "Multiplayer active" banner appears when >1 player is connected.
+- Open the Runtime panel in two browser tabs → both see the same authoritative state updates in real-time.
+
+Updated substrate guarantee status (honest):
+- Multiplayer: contract-only → partial (SSE + sessions, not full transport)
+- Replication: contract-only → partial (SSE replication, not interest management)
+- Persistence: simulator → partial (in-memory + DB, not full adapter)
+- Identity: partial (NextAuth + world sessions)
+
+Verified locally:
+- Session join: returns sessionId + player list
+- Tick: returns entitiesUpdated count
+- SSE stream: sends snapshot + incremental updates
+- Architecture: 13 laws, Multiplayer=partial, Replication=partial
+
+Stage Summary:
+- The Kernel now owns authoritative state. Two browsers see the same world state in real-time. This is the beginning of the real OS substrate.
+- The State Authority Law is in action: packages define+mutate through KernelContext, but the Kernel is the authority. The browser reads from the SSE stream; it doesn't own state.
+- Open the Runtime panel in two tabs to see multiplayer: both connect to the same SSE stream, both see the same tick-driven state changes, both see each other's session.
