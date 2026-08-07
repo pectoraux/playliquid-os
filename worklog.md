@@ -227,3 +227,34 @@ Stage Summary:
 - 11 substrate guarantees make the platform promises explicit and consumable.
 - 5 reuse policies give creators control over reuse-vs-diversity: reuse without homogenization.
 - The Console now shows the full reuse-first flow: decompose → search registry → score → reuse/generate, with the score breakdown visible.
+
+---
+Task ID: 5
+Agent: orchestrator (main)
+Task: Contract consolidation pass — the 10-item surgical fix list from the user's code review.
+
+Work Log:
+1. Removed duplicate ReusePolicy: types.ts had two definitions (reuse-all/reuse-infrastructure-only/reuse-none/auto AND reuse-freely/prefer-existing/approve-only/generate-replacements/never-reuse). Deleted the old one; kept only the 5-policy version.
+2. Removed old resolver semantics: deleted resolvePackages(), ResolveResult, /api/resolve route, useResolve hook. resolver.ts now only contains contextForWorld() (used by the prompt compiler). reuse-engine.ts is the sole resolver.
+3. Replaced Z.ai-specific LLM boundary with LLMProviderAdapter interface. Created src/lib/playliquid/llm-provider-adapter.ts with the provider-agnostic contract (completeChat). Four provider adapters in src/lib/playliquid/providers/: zai (default, wraps z-ai-web-dev-sdk), openai (OpenAI-compatible API), anthropic (Claude Messages API), local (Ollama/LM Studio with deterministic fallback). Provider selected via LLM_PROVIDER env var; recorded in package provenance. Deleted the old llm-client.ts. PlayLiquid now knows nothing about which LLM is active — it knows only the adapter contract.
+4. Made Contract version compatibility formal: Interface model gets minCompatible field. Composer now checks semver compatibility before wiring interfaces (required >= minCompatible AND required <= provided). Added parseSemver/compareSemver/isVersionCompatible helpers.
+5. Made Spatial Contracts formal: SpatialSlot model gets coordinateSystem, scale, adjacency, containment, attachmentPoints, topology. Composer now resolves packages to named spatial slots instead of family heuristics.
+6. Made capability enforcement go through the Kernel: invokeCapability now loads the entity's package, runs multi-layer capability negotiation, and returns ALLOW/DENY/LIMIT. No direct path from entity → execution. Denies by default if no world context is provided. This closes the gap the user identified: "capability negotiation exists, capability enforcement does not yet."
+7. Separated "substrate contract exists" from "substrate implementation exists": WorldService model gets implementationStatus (contract-only|simulator|partial|production) + implementationNote. All 11 substrate guarantees are honestly labeled in the architecture manifest. Services panel + Architecture panel show the status with color coding (zinc=contract-only, amber=simulator, sky=partial, emerald=production). Re-seeded all services with honest status.
+8. Turned World Projects into genuinely Git-like repositories: added WorldBranch, WorldCommit, PullRequest models. Branches have names + parent + head commit. Commits have parent (history graph) + hash + author + message + manifest/slots/policies snapshot. PRs have source/target branch + status + review status.
+9. Made World Build the sole immutable executable artifact: WorldBuild gets manifestLock (content-addressed package hashes + interface versions + lockHash) + branchName + commitHash. Two builds with the same lockHash are identical.
+10. Added frozen law #1: "A World Project defines what is desired; the PlayLiquid OS determines how that desire can become an operational world." Added frozen law #8: "A substrate contract existing is not the same as a substrate implementation existing." Updated law #5 to state PlayLiquid knows only the LLMProviderAdapter contract. Total: 8 laws.
+
+Also:
+- Removed output: "standalone" from next.config.ts (was causing Vercel build failures; Vercel handles Next.js builds natively).
+- Updated .env.example with all provider env vars.
+- Lint clean. Build succeeds locally. Pushed to GitHub (3 commits). Vercel auto-deploy triggered but the first attempt errored (standalone output); the fix is pushed and will deploy when the rate limit resets.
+
+Stage Summary:
+- All 10 consolidation items addressed. The contracts are now honest.
+- The LLM boundary is provider-agnostic: Z.ai, OpenAI, Anthropic, and local models are all interchangeable adapters. PlayLiquid records which provider was used in package provenance.
+- Capability enforcement is real: the Kernel gate denies by default, runs negotiation, and emits the result. No direct path to execution.
+- Every substrate guarantee is honestly labeled with its implementation status. The UI shows "contract-only" vs "simulator" vs "partial" vs "production" so the status is never misleading.
+- Spatial composition is now formal slot resolution, not family heuristics.
+- World Builds are content-addressed and reproducible via manifestLock.
+- World Projects have branches, commits, and PRs (Git-like version control).
