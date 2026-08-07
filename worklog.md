@@ -283,3 +283,39 @@ Stage Summary:
 - The PlayLiquid Protocol (7 layers) makes worlds coherent across engines: World Identity, Spatial Anchors, Entity Identity, State Sync, Event Stream, Capabilities, Contracts.
 - The Capability Matrix makes it explicit: Multiplayer, Identity, Persistence, Capability Enforcement, Ads, Economy, World Identity are ALWAYS PlayLiquid OS — never engine-implemented.
 - Spatial Anchors have semantic identity (earth.europe.netherlands.amsterdam.museum-district.rijksmuseum) with global coordinates in the playliquid-world coordinate system. Unity transforms these to Unity coordinates; the browser transforms them to canvas pixels; the anchor identity stays PlayLiquid-native.
+
+---
+Task ID: 7
+Agent: orchestrator (main)
+Task: Runtime ABI + execution-boundary consolidation pass (the 12-item list).
+
+Work Log:
+1. Froze terminology: fixed "9 primitives" → "10 primitives" in types.ts header, architecture panel badge, seed comments.
+2. Defined the canonical Package Runtime ABI (src/lib/playliquid/package-abi.ts): the frozen execution boundary. PackageRuntimeABI lifecycle (initialize → mount → update → handle → render → dispose), KernelContext (what the Kernel exposes), PackageImplementation (what an executable package IS), PackageManifest, RenderContext (replaceable renderer), PackageExecutor.
+3. Defined exactly what a Package implementation is: PackageImplementation with target, runtime, version, entrypoint, format, capabilities, contracts, assets, dependencies. One package can have multiple implementations (playliquid-web, unity, unreal).
+4. Defined exactly what the Kernel exposes: KernelContext with getPosition (read-only), requestMovement (Kernel may deny), getState/setState (Kernel persists+replicates), emit/on (Kernel routes), invokeCapability (Kernel gate — no direct path to execution), requestService (OS services), log.
+5. Defined the browser runtime execution model: the BrowserRuntime now loads each entity's package implementation, creates a KernelContext, and calls the ABI lifecycle. It's a Package Executor, not a scene visualizer.
+6. Made ONE tiny real executable Package: SpinningMarker (src/lib/playliquid/packages/spinning-marker.ts). It conforms to the ABI — initializes with KernelContext, maintains rotation state, renders itself via RenderContext, emits events on click, requests capabilities through the Kernel gate. Has both playliquid-web AND unity implementations.
+7. Made that same Package expose the same identity through a hypothetical Unity adapter: the manifest has implementations for both playliquid-web (js-module) and unity (unity-prefab), both conforming to the same ABI.
+8. Verified capability invocation passes through the Kernel: invokeCapability in the KernelContext calls the Kernel's capability gate (negotiation engine), which returns ALLOW/DENY/LIMIT. No direct path to execution.
+9. Made world state authoritative outside the renderer: the browser runtime reads state from the Scene API (server-authoritative), passes it to packages via KernelContext. Packages request changes through setState/requestMovement; they don't own the state.
+10. Made the canvas/renderer replaceable: the renderer is SEPARATE from the executor. The package draws into a RenderContext (type: canvas-2d | webgl | unity | unreal). The same package can render to any adapter by conforming to the same ABI.
+11. Fenced off server-side LLM: added /api/llm/compile-prompt (produces Specification + Prompt + open targets — does NOT call any LLM) and /api/llm/import-package (accepts the user's pasted LLM result, certifies + registers with provenance "user-owned"). The server-side LLMProviderAdapter remains as optional convenience.
+12. Fixed build lock bug: manifestLock minCompatible was hardcoded to "0.0.0"; now reads actual minCompatible from interface schema. Connected SpatialSlot to SpatialAnchor via anchorSemanticId field.
+
+Two new frozen laws:
+- Law #11: Package Runtime ABI Law — every executable package conforms to the ABI; interacts with the world ONLY through KernelContext; never touches multiplayer/persistence/state authority/capabilities/networking. The browser runtime is a Package Executor.
+- Law #12: User-Owned LLM Law — the canonical LLM flow is user-owned; PlayLiquid produces a Specification + Prompt; the user takes it to their LLM and imports the result; PlayLiquid doesn't need the user's API key.
+
+Architecture panel updated with:
+- Package Runtime ABI section (lifecycle + KernelContext + cannot-touch list)
+- User-Owned LLM Boundary section (5-step flow + open targets)
+
+Verified locally: 12 laws, packageRuntimeABI (6 lifecycle, 7 kernelCtx, 7 cannot-touch), userLLMBoundary (5 flow steps, 4 open targets). Pushed to GitHub.
+
+Stage Summary:
+- PlayLiquid now has a real execution boundary. The browser runtime loads and executes packages through the Package Runtime ABI, not by drawing shapes.
+- The SpinningMarker package is a real executable — it initializes, updates, renders, handles events, and requests capabilities through the Kernel gate.
+- The renderer is replaceable — the same package can render to canvas, WebGL, Unity, or Unreal by conforming to the same ABI with a different RenderContext.
+- The LLM boundary is user-owned — PlayLiquid produces the prompt, the user takes it to their LLM, imports the result. PlayLiquid doesn't need API keys.
+- 12 frozen laws. The architecture is now honest about what's a contract vs what's an implementation.
