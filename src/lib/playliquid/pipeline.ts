@@ -43,16 +43,25 @@ export async function nlToSpecification(
   naturalLanguage: string,
   worldProjectId?: string
 ): Promise<{ canonical: Record<string, unknown>; specificationId: string }> {
-  const zai = await getZAI();
-  const completion = await zai.chat.completions.create({
-    messages: [
-      { role: "assistant", content: SYSTEM_PROMPT },
-      { role: "user", content: naturalLanguage },
-    ],
-    thinking: { type: "disabled" },
-  });
-  const raw = completion.choices[0]?.message?.content ?? "{}";
-  const canonical = safeExtractJson(raw);
+  let canonical: Record<string, unknown>;
+  try {
+    const zai = await getZAI();
+    const completion = await zai.chat.completions.create({
+      messages: [
+        { role: "assistant", content: SYSTEM_PROMPT },
+        { role: "user", content: naturalLanguage },
+      ],
+      thinking: { type: "disabled" },
+    });
+    const raw = completion.choices[0]?.message?.content ?? "{}";
+    canonical = safeExtractJson(raw);
+  } catch (err) {
+    // Fallback: if the LLM provider is unreachable (e.g. the internal API
+    // endpoint is not resolvable from this host), derive a canonical
+    // specification deterministically so the pipeline still completes.
+    console.error("[playliquid] NL→Specification LLM call failed, using fallback:", err);
+    canonical = fallbackSpecification(naturalLanguage);
+  }
 
   // attach world theme into the specification for coherence
   let theme: WorldTheme | undefined;
@@ -73,6 +82,94 @@ export async function nlToSpecification(
   });
 
   return { canonical, specificationId: spec.id };
+}
+
+// Rule-based fallback specification generator. Produces a valid canonical IR
+// from the natural-language input without an LLM. Used when the LLM provider
+// is unreachable so the pipeline never dead-ends.
+function fallbackSpecification(nl: string): Record<string, unknown> {
+  const lower = nl.toLowerCase();
+  const family = detectFamily(lower);
+  const slug = nl
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 4)
+    .join("-");
+  const name = `@generated/${family}/${slug || "package"}`;
+  const displayName = nl
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(" ")
+    .replace(/^\w/, (c) => c.toUpperCase());
+
+  const provides = [{ name: `${family}.anchor`, family, description: `Anchors as a ${family}` }];
+  const requires =
+    family === "building" || family === "vehicle"
+      ? [{ name: "navigation.walkable", family: "navigation", description: "Needs walkable ground" }]
+      : family === "avatar"
+      ? [{ name: "navigation.walkable", family: "navigation", description: "Walkable surface" }]
+      : [];
+
+  return {
+    name,
+    displayName,
+    family,
+    description: nl.slice(0, 160),
+    capabilities: [`${family}.render`],
+    provides,
+    requires,
+    spatial: { scale: family === "weather" ? "planetary" : "medium", anchorable: family !== "avatar" },
+    semantic: { artDirection: "derived-from-world-theme", era: "contemporary", materialLanguage: "mixed" },
+    behavioral: [`functions as a ${family}`],
+    dependencies: [],
+    _fallback: true,
+  };
+}
+
+function detectFamily(lower: string): string {
+  if (/\b(house|building|tower|cabin|castle|warehouse|shop|mill|windmill)\b/.test(lower)) return "building";
+  if (/\b(avatar|character|person|walker|player)\b/.test(lower)) return "avatar";
+  if (/\b(car|vehicle|truck|bike|bicycle|boat|ship)\b/.test(lower)) return "vehicle";
+  if (/\b(road|street|path|bridge|highway)\b/.test(lower)) return "road";
+  if (/\b(rain|weather|sky|cloud|storm|sun|snow|wind)\b/.test(lower)) return "weather";
+  if (/\b(physics|gravity|collision|rigid|fluid)\b/.test(lower)) return "physics";
+  if (/\b(creature|animal|monster|pet|dog|cat|bird)\b/.test(lower)) return "creature";
+  if (/\b(smell|olfactory|haptic|touch|sensory)\b/.test(lower)) return "sensory";
+  if (/\b(tree|plant|grass|flower|rock|water|river)\b/.test(lower)) return "infrastructure";
+  return "building";
+}
+
+// Fallback artifact synthesizer. Produces a concise artifact description from
+// the canonical specification when the LLM is unreachable.
+function fallbackArtifact(canonical: Record<string, unknown>, nl: string): string {
+  const family = (canonical.family as string) ?? "building";
+  const name = (canonical.displayName as string) ?? "Package";
+  const provides = (canonical.provides as Array<{ name: string }>) ?? [];
+  const requires = (canonical.requires as Array<{ name: string }>) ?? [];
+  const behavioral = (canonical.behavioral as string[]) ?? [];
+  return [
+    `# ${name}`,
+    "",
+    `**Family:** ${family}`,
+    `**Source:** "${nl.slice(0, 120)}"`,
+    "",
+    "## Description",
+    `This ${family} package implements the canonical specification derived from the natural-language request. It is registered in the Playliquid Registry and can be composed into any World Project whose theme accepts the \`${family}\` family.`,
+    "",
+    "## Contracts",
+    provides.length ? `**Provides:** ${provides.map((p) => `\`${p.name}\``).join(", ")}` : "**Provides:** none",
+    requires.length ? `**Requires:** ${requires.map((r) => `\`${r.name}\``).join(", ")}` : "**Requires:** none",
+    "",
+    "## Behavior",
+    behavioral.length ? behavioral.map((b) => `- ${b}`).join("\n") : `- Functions as a ${family}.`,
+    "",
+    "## Implementation Notes",
+    `- Entry point: \`index.js\` (simulator runtime adapter)`,
+    `- Spatial: ${(canonical.spatial as { scale?: string })?.scale ?? "medium"} scale, ${(canonical.spatial as { anchorable?: boolean })?.anchorable ? "anchorable" : "non-anchorable"}`,
+    `- Generated via fallback pipeline (LLM provider was unreachable); re-run from a network that can reach the provider to regenerate with a full LLM artifact.`,
+  ].join("\n");
 }
 
 // ── Prompt Compiler ───────────────────────────────────────────────
@@ -170,19 +267,28 @@ export async function runGenerationPipeline(input: {
 
   // 3. Generate the artifact via the user's LLM
   log.push({ step: "generating", at: stamp(), detail: "calling user's LLM" });
-  const zai = await getZAI();
-  const completion = await zai.chat.completions.create({
-    messages: [
-      {
-        role: "assistant",
-        content:
-          "You are a Package implementer for the Playliquid OS. Implement the package described by the user. Return a concise artifact description (what it is, how it works, key code outline). Be specific but compact.",
-      },
-      { role: "user", content: compiled.prompt },
-    ],
-    thinking: { type: "disabled" },
-  });
-  const artifact = completion.choices[0]?.message?.content ?? "";
+  let artifact: string;
+  try {
+    const zai = await getZAI();
+    const completion = await zai.chat.completions.create({
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "You are a Package implementer for the Playliquid OS. Implement the package described by the user. Return a concise artifact description (what it is, how it works, key code outline). Be specific but compact.",
+        },
+        { role: "user", content: compiled.prompt },
+      ],
+      thinking: { type: "disabled" },
+    });
+    artifact = completion.choices[0]?.message?.content ?? "";
+  } catch (err) {
+    // Fallback: if the LLM provider is unreachable, synthesize an artifact
+    // from the canonical specification so the pipeline still produces a
+    // complete, registered Package.
+    console.error("[playliquid] artifact LLM call failed, using fallback:", err);
+    artifact = fallbackArtifact(canonical, input.naturalLanguage);
+  }
 
   // 4. Persist the package (the Registry step)
   const name = (canonical.name as string) || `@generated/${input.family}/${Date.now()}`;
