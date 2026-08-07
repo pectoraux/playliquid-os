@@ -174,29 +174,56 @@ export function broadcastEvent(buildId: string, event: { type: string; [key: str
 }
 
 // ── Session management ────────────────────────────────────────────
-// When a player joins, they spawn as an avatar entity in the authoritative
-// state. Other players see them via the SSE stream. This is real
-// multiplayer presence — you are IN the world, not just observing it.
+// When a player joins, they spawn as an entity in the authoritative
+// state. The entity carries its own declarativeArtifact — the browser
+// runtime treats it identically to any other entity. The runtime does
+// NOT know it's a "player" — it just sees an entity with a package.
 export async function createSession(buildId: string, name: string): Promise<string> {
   if (!sessions.has(buildId)) sessions.set(buildId, new Map());
   const sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   sessions.get(buildId)!.set(sessionId, { name, connectedAt: Date.now() });
 
-  // Spawn the player as an avatar entity in authoritative state
+  // Spawn the player as an entity in authoritative state.
+  // The entity carries a declarativeArtifact so the browser runtime
+  // can execute it through the same DeclarativePackageInstance path
+  // as any other entity — no special "player" rendering needed.
   await initAuthoritativeState(buildId);
   const stateMap = authoritativeState.get(buildId);
   if (stateMap) {
     const avatarId = `avatar-${sessionId}`;
     const spawnX = (Math.random() - 0.5) * 20;
     const spawnZ = (Math.random() - 0.5) * 20;
+    const color = `hsl(${Math.random() * 360}, 70%, 60%)`;
+
+    // The declarative artifact that defines the player avatar's behavior.
+    // This is the SAME format any LLM would produce. The browser runtime
+    // loads and executes it through the generic Package Executor —
+    // it does NOT know this is a "player."
+    const playerArtifact = JSON.stringify({
+      abiVersion: "1.0.0",
+      name: `@playliquid/player/${sessionId}`,
+      displayName: name,
+      family: "avatar",
+      capabilities: ["avatar.movement"],
+      provides: ["avatar.movement"],
+      requires: ["navigation.walkable"],
+      initialState: { direction: 0, color, name, sessionId },
+      update: { behavior: "static", params: {} },
+      render: {
+        behavior: "shape",
+        params: { shape: "circle", size: 10, color, showDirection: true, label: name },
+      },
+      onClick: { behavior: "emit", params: { event: "player.click" } },
+    });
+
     stateMap.set(avatarId, {
       position: { x: spawnX, y: 0, z: spawnZ },
       state: {
         name,
         sessionId,
-        isPlayer: true,
-        color: `hsl(${Math.random() * 360}, 70%, 60%)`,
+        declarativeArtifact: playerArtifact,
         direction: 0,
+        color,
       },
       updatedAt: Date.now(),
     });

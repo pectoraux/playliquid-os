@@ -251,29 +251,33 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
     };
   }, [buildId]);
 
-  // Initialize package instances — the EXACT artifact execution path.
+  // Initialize package instances — the GENERIC execution path.
   //
   // The browser runtime is GENERIC. It does not know what an avatar,
   // building, vehicle, or player is. Every entity gets its behavior
   // from a PackageInstance loaded from a declarative artifact.
   //
-  // For scene entities: the artifact comes from the Scene API
-  //   (entity.declarativeArtifact — the exact LLM-produced JSON).
-  // For player avatars: a declarative artifact is synthesized from
-  //   the player's state (color, name, direction) — the browser still
-  //   doesn't render them directly; the DeclarativePackageInstance does.
+  // There is ONE resolution path for ALL entities:
+  //   1. Check if the entity has a declarativeArtifact
+  //      - For scene entities: from the Scene API (entity.declarativeArtifact)
+  //      - For SSE entities (player avatars): from the SSE state (auth.state.declarativeArtifact)
+  //   2. If it has one: validate + create a DeclarativePackageInstance — the EXACT artifact
+  //   3. If it doesn't: check dev bootstrap (conformance tests only, non-strict mode)
+  //   4. If nothing: the entity is invisible (strict mode — no fallbacks)
+  //
+  // The browser NEVER synthesizes artifacts. The server provides the
+  // declarativeArtifact for player avatars via the SSE stream.
   useEffect(() => {
     if (!scene) return;
 
-    // ── Scene entities ──
+    // ── Scene entities (from the DB via Scene API) ──
     for (const entity of scene.entities) {
       if (!entity.package) continue;
       if (packageInstancesRef.current.has(entity.id)) continue;
 
       let impl: PackageImplementation | null = null;
 
-      // 1. EXACT ARTIFACT: the entity's declarative artifact from the Scene API.
-      //    This is the LLM's EXACT package — not a family fallback.
+      // 1. EXACT ARTIFACT from the Scene API
       if (entity.declarativeArtifact) {
         const validation = validateDeclarativeArtifact(entity.declarativeArtifact);
         if (validation.valid && validation.artifact) {
@@ -281,7 +285,7 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
         }
       }
 
-      // 2. Dev bootstrap (conformance test packages only — NOT for imported packages)
+      // 2. Dev bootstrap (conformance test packages only, non-strict mode)
       if (!impl) {
         impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
       }
@@ -299,81 +303,44 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       }
     }
 
-    // ── Player avatars from SSE ──
-    // Player avatars are NOT in the scene's DB entities — they're spawned
-    // dynamically by createSession. They still need a PackageInstance to render.
-    // We synthesize a declarative artifact from the player's state.
+    // ── SSE entities (player avatars from the authoritative state stream) ──
+    // These entities are NOT in the scene's DB — they're spawned dynamically
+    // by createSession on the server. The server includes a declarativeArtifact
+    // in the entity's state, so the browser loads and executes it through the
+    // SAME path as scene entities. The browser does NOT synthesize anything.
     const sceneEntityIds = new Set(scene.entities.map((e) => e.id));
     for (const [entityId, auth] of authStateRef.current.entries()) {
       if (sceneEntityIds.has(entityId)) continue;
       if (packageInstancesRef.current.has(entityId)) continue;
 
-      const isPlayer = (auth.state.isPlayer as boolean) ?? false;
-      if (!isPlayer) continue;
+      // The server provides the declarativeArtifact in the entity's state.
+      // The browser just loads it — no synthesis, no domain knowledge.
+      const artifactText = (auth.state.declarativeArtifact as string) ?? null;
+      if (!artifactText) continue;
 
-      // Synthesize a declarative artifact for the player avatar.
-      // The browser still doesn't render this directly — the
-      // DeclarativePackageInstance interprets it through the ABI.
-      const color = (auth.state.color as string) ?? "#a78bfa";
-      const name = (auth.state.name as string) ?? "Player";
-      const playerArtifact = {
-        abiVersion: "1.0.0",
-        name: `@playliquid/player/${entityId}`,
-        displayName: name,
-        family: "avatar",
-        capabilities: ["avatar.movement"],
-        provides: ["avatar.movement"],
-        requires: ["navigation.walkable"],
-        initialState: { direction: 0, color, name },
-        update: { behavior: "static" as const, params: {} },
-        render: {
-          behavior: "shape" as const,
-          params: {
-            shape: "circle" as const,
-            size: 10,
-            color,
-            showDirection: true,
-            label: name,
-          },
-        },
-        onClick: { behavior: "emit" as const, params: { event: "player.click" } },
+      const validation = validateDeclarativeArtifact(artifactText);
+      if (!validation.valid || !validation.artifact) continue;
+
+      const impl = createDeclarativeImplementation(validation.artifact);
+      // Use the SAME createKernelContext path as scene entities — no
+      // special player KernelContext. Capability requests go through
+      // the real Kernel negotiation endpoint.
+      const entityLike: SceneEntity = {
+        id: entityId,
+        name: (auth.state.name as string) ?? "Entity",
+        package: { name: validation.artifact.name, family: validation.artifact.family, displayName: validation.artifact.displayName },
+        position: auth.position,
+        components: [],
+        state: auth.state,
+        artifact: null,
+        declarativeArtifact: artifactText,
       };
-      const impl = createDeclarativeImplementation(playerArtifact);
-      const ctx: KernelContext = {
-        entityId,
-        entityName: name,
-        getPosition: () => auth.position,
-        requestMovement: (delta) => {
-          if (!buildId) return;
-          fetch(`/api/runtime/${buildId}/mutate`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ entityId, positionPatch: delta }),
-          }).catch(() => {});
-        },
-        getState: () => auth.state,
-        setState: (patch) => {
-          if (!buildId) return;
-          fetch(`/api/runtime/${buildId}/mutate`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ entityId, statePatch: patch }),
-          }).catch(() => {});
-        },
-        emit: (event, payload) => {
-          (eventHandlersRef.current.get(event) ?? []).forEach((h) => h(payload));
-        },
-        on: (event, handler) => {
-          if (!eventHandlersRef.current.has(event)) eventHandlersRef.current.set(event, []);
-          eventHandlersRef.current.get(event)!.push(handler);
-        },
-        invokeCapability: async () => ({ granted: true, action: "allow" as const }),
-        requestService: async () => ({ ok: true }),
-        log: () => {},
-      };
+      const ctx = createKernelContext(entityLike);
       const instance = impl.createInstance();
       instance.initialize(ctx, {
-        name: playerArtifact.name, displayName: name,
-        family: "avatar", version: "1.0.0", specification: {},
-        capabilities: playerArtifact.capabilities, provides: [], requires: [],
+        name: validation.artifact.name, displayName: validation.artifact.displayName,
+        family: validation.artifact.family, version: "1.0.0", specification: {},
+        capabilities: impl.capabilities, provides: [], requires: [],
       });
       instance.mount();
       packageInstancesRef.current.set(entityId, instance);
