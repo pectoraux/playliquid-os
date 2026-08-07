@@ -174,10 +174,36 @@ export function broadcastEvent(buildId: string, event: { type: string; [key: str
 }
 
 // ── Session management ────────────────────────────────────────────
-export function createSession(buildId: string, name: string): string {
+// When a player joins, they spawn as an avatar entity in the authoritative
+// state. Other players see them via the SSE stream. This is real
+// multiplayer presence — you are IN the world, not just observing it.
+export async function createSession(buildId: string, name: string): Promise<string> {
   if (!sessions.has(buildId)) sessions.set(buildId, new Map());
   const sessionId = `s-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   sessions.get(buildId)!.set(sessionId, { name, connectedAt: Date.now() });
+
+  // Spawn the player as an avatar entity in authoritative state
+  await initAuthoritativeState(buildId);
+  const stateMap = authoritativeState.get(buildId);
+  if (stateMap) {
+    const avatarId = `avatar-${sessionId}`;
+    const spawnX = (Math.random() - 0.5) * 20;
+    const spawnZ = (Math.random() - 0.5) * 20;
+    stateMap.set(avatarId, {
+      position: { x: spawnX, y: 0, z: spawnZ },
+      state: {
+        name,
+        sessionId,
+        isPlayer: true,
+        color: `hsl(${Math.random() * 360}, 70%, 60%)`,
+        direction: 0,
+      },
+      updatedAt: Date.now(),
+    });
+    // Broadcast the new avatar to all clients
+    broadcastStateUpdate(buildId, avatarId);
+  }
+
   broadcastEvent(buildId, { event: "session.join", sessionId, name });
   return sessionId;
 }
@@ -185,6 +211,16 @@ export function createSession(buildId: string, name: string): string {
 export function removeSession(buildId: string, sessionId: string): void {
   const session = sessions.get(buildId)?.get(sessionId);
   sessions.get(buildId)?.delete(sessionId);
+
+  // Remove the player's avatar from authoritative state
+  const stateMap = authoritativeState.get(buildId);
+  if (stateMap) {
+    const avatarId = `avatar-${sessionId}`;
+    stateMap.delete(avatarId);
+    // Broadcast removal
+    broadcastEvent(buildId, { event: "entity.remove", entityId: avatarId });
+  }
+
   if (session) {
     broadcastEvent(buildId, { event: "session.leave", sessionId, name: session.name });
   }

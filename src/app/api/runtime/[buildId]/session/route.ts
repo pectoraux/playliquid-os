@@ -14,7 +14,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ buildId: s
   const { action, sessionId, name } = body;
 
   if (action === "join") {
-    const sid = createSession(buildId, name ?? "Anonymous");
+    const sid = await createSession(buildId, name ?? "Anonymous");
     return NextResponse.json({ sessionId: sid, sessions: getSessions(buildId) });
   }
 

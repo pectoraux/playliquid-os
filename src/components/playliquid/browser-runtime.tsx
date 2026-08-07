@@ -185,6 +185,10 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
               body: JSON.stringify({ action: "list" }),
             }).then(r => r.json()).then(data => setSessions(data.sessions ?? [])).catch(() => {});
           }
+          if (msg.event === "entity.remove") {
+            // Remove the avatar from local authoritative state
+            authStateRef.current.delete(msg.entityId);
+          }
         }
       } catch { /* parse error */ }
     };
@@ -264,6 +268,52 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       }
     }
   }, [scene, createKernelContext]);
+
+  // ── Phase F: WASD/arrow key movement ──────────────────────────────
+  // The player moves their avatar. Movement goes through the Kernel
+  // (move-player endpoint), which updates authoritative state and
+  // replicates to all clients. Other players see you move in real-time.
+  useEffect(() => {
+    if (!buildId || !sessionId) return;
+    const keys: Record<string, boolean> = {};
+    let lastMove = 0;
+
+    function onKeyDown(e: KeyboardEvent) {
+      // Only handle WASD + arrows when the canvas is focused or always
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      keys[e.key.toLowerCase()] = true;
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      keys[e.key.toLowerCase()] = false;
+    }
+
+    // Movement loop — send movement requests at most every 50ms
+    const moveInterval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastMove < 50) return;
+      let dx = 0, dz = 0;
+      const speed = 2;
+      if (keys["w"] || keys["arrowup"]) dz -= speed;
+      if (keys["s"] || keys["arrowdown"]) dz += speed;
+      if (keys["a"] || keys["arrowleft"]) dx -= speed;
+      if (keys["d"] || keys["arrowright"]) dx += speed;
+      if (dx === 0 && dz === 0) return;
+      lastMove = now;
+      fetch(`/api/runtime/${buildId}/move-player`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, deltaX: dx, deltaZ: dz }),
+      }).catch(() => {});
+    }, 50);
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      clearInterval(moveInterval);
+    };
+  }, [buildId, sessionId]);
 
   // ── Auto-tick: trigger the server-side scheduler every 2s ─────────
   // In a full system, the Kernel would tick on its own. For the MVP,
@@ -369,10 +419,7 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
         const inst = packageInstancesRef.current.get(entity.id);
         const isSelected = selectedEntity === entity.id;
         if (inst) {
-          // Override the instance's ctx getState to return authoritative state
           const rc = new CanvasRenderContext(ctx2d, cx, cy, pos.x, pos.y, pos.z, scale, isSelected);
-          // Temporarily patch the instance's state access to use authoritative state
-          // (In a full system, the KernelContext would already read from authority)
           inst.render(rc);
         } else {
           ctx2d.fillStyle = "#666"; ctx2d.beginPath(); ctx2d.arc(cx, cy, 5, 0, Math.PI * 2); ctx2d.fill();
@@ -383,11 +430,58 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
         }
       }
 
+      // ── Phase F: Render player avatars from authoritative state ──
+      // Avatars are entities that exist in the authoritative state but
+      // NOT in the scene's DB entities (they're spawned dynamically by
+      // createSession). They are real multiplayer presences.
+      const sceneEntityIds = new Set(s.entities.map((e) => e.id));
+      for (const [entityId, auth] of authStateRef.current.entries()) {
+        if (sceneEntityIds.has(entityId)) continue; // already rendered above
+        const isPlayer = (auth.state.isPlayer as boolean) ?? false;
+        if (!isPlayer) continue;
+
+        const cx = W / 2 + auth.position.x * scale;
+        const cy = H / 2 + auth.position.z * scale;
+        if (cx < 0 || cx > W || cy < 0 || cy > H) continue;
+
+        const name = (auth.state.name as string) ?? "Player";
+        const color = (auth.state.color as string) ?? "#a78bfa";
+        const direction = (auth.state.direction as number) ?? 0;
+        const isYou = auth.state.sessionId === sessionId;
+
+        // Draw player avatar as a distinct circle
+        const size = 10;
+        ctx2d.fillStyle = color;
+        ctx2d.strokeStyle = isYou ? "#ffffff" : "rgba(0,0,0,0.3)";
+        ctx2d.lineWidth = isYou ? 2 : 1;
+        ctx2d.beginPath();
+        ctx2d.arc(cx, cy, size, 0, Math.PI * 2);
+        ctx2d.fill();
+        ctx2d.stroke();
+
+        // Direction indicator
+        ctx2d.strokeStyle = "rgba(255,255,255,0.7)";
+        ctx2d.lineWidth = 1.5;
+        ctx2d.beginPath();
+        ctx2d.moveTo(cx, cy);
+        ctx2d.lineTo(cx + Math.cos(direction) * size * 1.5, cy + Math.sin(direction) * size * 1.5);
+        ctx2d.stroke();
+
+        // Name label
+        ctx2d.fillStyle = isYou ? "#ffffff" : "rgba(255,255,255,0.6)";
+        ctx2d.font = `${isYou ? "bold " : ""}9px monospace`;
+        ctx2d.fillText(`${name}${isYou ? " (you)" : ""}`, cx + size + 2, cy + 3);
+      }
+
       // HUD
       ctx2d.fillStyle = "rgba(255,255,255,0.5)"; ctx2d.font = "10px monospace";
       ctx2d.fillText(`PlayLiquid Web Runtime · protocol v${s.runtime.protocolVersion}`, 8, 14);
       ctx2d.fillText(`${s.entities.length} entities · ${packageInstancesRef.current.size} instances · authoritative state`, 8, 28);
       ctx2d.fillText(`${connected ? "● connected" : "○ disconnected"} · ${sessions.length} players · tick #${tickCount} · streaming: spatial cells`, 8, 42);
+      if (sessionId) {
+        ctx2d.fillStyle = "rgba(125, 211, 252, 0.6)";
+        ctx2d.fillText(`WASD / arrows to move your avatar`, 8, 56);
+      }
 
       requestAnimationFrame(loop);
     };
