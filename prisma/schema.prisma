@@ -43,6 +43,7 @@ model Package {
   entities       Entity[]
   generationReq  GenerationRequest?
   contributions  Contribution[]
+  runtimeArtifacts RuntimeArtifact[]
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -112,6 +113,7 @@ model WorldProject {
   branches WorldBranch[]
   commits WorldCommit[]
   pullRequests PullRequest[]
+  spatialAnchors SpatialAnchor[]
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -463,4 +465,75 @@ model PullRequest {
   mergedAt            DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════════════════════
+// PLAYLIQUID PROTOCOL — SPATIAL ANCHORS
+// The cross-engine spatial anchoring protocol. A spatial anchor has a
+// global coordinate, local coordinate, orientation, scale, semantic
+// identity, parent anchor, and coordinate system. This is what makes a
+// world coherent across browser, mobile, Unity, Unreal — the engine
+// transforms PlayLiquid coordinates to its own; it does not own them.
+// ════════════════════════════════════════════════════════════════
+model SpatialAnchor {
+  id              String   @id @default(cuid())
+  worldProjectId  String
+  worldProject    WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
+  // Semantic identity: e.g. "earth.netherlands.amsterdam.canal-belt"
+  semanticId      String   @unique
+  displayName     String
+  parentAnchorId  String?  // parent anchor (forms the hierarchy)
+  // Global coordinate in the PlayLiquid world coordinate system
+  globalX         Float
+  globalY         Float
+  globalZ         Float
+  // Local coordinate relative to parent
+  localX          Float    @default(0)
+  localY          Float    @default(0)
+  localZ          Float    @default(0)
+  // Orientation as quaternion (w, x, y, z)
+  orientW         Float    @default(1)
+  orientX         Float    @default(0)
+  orientY         Float    @default(0)
+  orientZ         Float    @default(0)
+  scale           Float    @default(1)
+  coordinateSystem String  @default("playliquid-world")
+  anchorType      String   @default("point") // point | region | network | building | plot
+  semantic        String   @default("") // city | district | building | road | water | etc.
+  createdAt       DateTime @default(now())
+
+  @@index([worldProjectId])
+  @@index([parentAnchorId])
+}
+
+// ════════════════════════════════════════════════════════════════
+// RUNTIME ARTIFACTS
+// A Package has a canonical specification (engine-independent). A Runtime
+// Artifact is an engine-specific implementation of that package. The
+// package remains the universal primitive; the artifact is one way of
+// realizing it.
+//
+//   Package (canonical)
+//     ├── specification
+//     ├── contracts
+//     ├── capabilities
+//     └── runtimeArtifacts
+//           ├── PlayLiquid Web (canvas/WebGPU)
+//           ├── Unity (scene/prefab)
+//           ├── Unreal (asset)
+//           └── future engines
+// ════════════════════════════════════════════════════════════════
+model RuntimeArtifact {
+  id          String   @id @default(cuid())
+  packageId   String
+  package     Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  target      String   // "playliquid-web" | "playliquid-mobile" | "unity" | "unreal" | "godot"
+  artifactUri String   // where the engine-specific artifact lives
+  format      String   // "canvas-json" | "unity-prefab" | "unreal-asset" | "godot-scene"
+  status      String   @default("READY") // READY | DRAFT | DEPRECATED
+  metadata    String   @default("{}") // JSON: engine-specific metadata
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([packageId, target])
 }

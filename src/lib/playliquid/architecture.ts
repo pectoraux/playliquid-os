@@ -99,6 +99,8 @@ export const ARCHITECTURE: ArchitectureManifest = {
     "No future feature should require PlayLiquid to own the user's implementation model, LLM, or hosting infrastructure.",
     "A package must remain reusable across worlds. Worlds layer capability policies on top — they do not modify packages. (Superman can fly in 500 worlds and be grounded in 501 without 501 implementations.)",
     "A substrate contract existing is not the same as a substrate implementation existing. Each OS guarantee is honestly labeled: contract-only, simulator, partial, or production.",
+    "Native Runtime Law: Every certified World Build must have a defined execution path through a PlayLiquid Runtime Adapter. The canonical PlayLiquid runtime target is browser/mobile-native execution; external engines (Unity, Unreal, Godot) are optional adapters and must not redefine the world's canonical identity, contracts, spatial model, or state model.",
+    "Engine Independence Law: Rendering and engine implementation are replaceable runtime concerns. A World, Package, Entity, spatial anchor, capability, and semantic identity remain PlayLiquid-native regardless of the engine used to realize them. The engine is an implementation detail; the world is not.",
   ],
   // The critical OS-substrate-vs-LLM-implementation distinction
   substrate: {
@@ -205,6 +207,45 @@ export const ARCHITECTURE: ArchitectureManifest = {
       { capability: "LLM", belongs: "Implementation backend chosen by the user", reason: "PlayLiquid doesn't own the LLM; it owns the boundary." },
     ],
   },
+  // The PlayLiquid Protocol — the shared protocol that makes worlds work
+  // across engines. This is what prevents different engines from creating
+  // disconnected islands.
+  playliquidProtocol: {
+    description: "The PlayLiquid World Interoperability Protocol — the shared protocol that makes a world coherent across browser, mobile, Unity, Unreal, and future runtimes. The engine is an implementation detail; the world is not.",
+    layers: [
+      { name: "World Identity", contract: "protocol.world", role: "A world has a canonical identity regardless of which engine renders it." },
+      { name: "Spatial Anchors", contract: "protocol.spatial.anchor", role: "Global coordinate, local coordinate, orientation, scale, semantic identity, parent anchor, coordinate system." },
+      { name: "Entity Identity", contract: "protocol.entity", role: "An entity has a PlayLiquid-native identity that persists across engines." },
+      { name: "State Synchronization", contract: "protocol.state", role: "Authoritative state → all runtime adapters. The OS owns state; engines render it." },
+      { name: "Event Stream", contract: "protocol.events", role: "World events flow to all adapters in engine-independent format." },
+      { name: "Capabilities", contract: "protocol.capabilities", role: "Effective capabilities are computed by the Kernel and enforced across all adapters." },
+      { name: "Contracts", contract: "protocol.contracts", role: "Interface wiring is resolved at composition time, not at render time." },
+    ],
+  },
+  // The capability matrix — which capabilities are PlayLiquid OS vs engine.
+  // This is the table that prevents Unity from implementing PlayLiquid multiplayer.
+  capabilityMatrix: [
+    { capability: "Rendering", nativeWeb: "PlayLiquid Web Runtime", mobile: "PlayLiquid Mobile Runtime", unity: "Unity", unreal: "Unreal", osOwned: false },
+    { capability: "Physics", nativeWeb: "PlayLiquid/native", mobile: "PlayLiquid/native", unity: "Unity", unreal: "Unreal", osOwned: false },
+    { capability: "Audio", nativeWeb: "native", mobile: "native", unity: "engine", unreal: "engine", osOwned: false },
+    { capability: "Input", nativeWeb: "browser", mobile: "device", unity: "engine", unreal: "engine", osOwned: false },
+    { capability: "Multiplayer", nativeWeb: "PlayLiquid OS", mobile: "PlayLiquid OS", unity: "PlayLiquid OS", unreal: "PlayLiquid OS", osOwned: true },
+    { capability: "Identity", nativeWeb: "PlayLiquid OS", mobile: "PlayLiquid OS", unity: "PlayLiquid OS", unreal: "PlayLiquid OS", osOwned: true },
+    { capability: "Persistence", nativeWeb: "PlayLiquid OS", mobile: "PlayLiquid OS", unity: "PlayLiquid OS", unreal: "PlayLiquid OS", osOwned: true },
+    { capability: "Capability Enforcement", nativeWeb: "PlayLiquid Kernel", mobile: "PlayLiquid Kernel", unity: "PlayLiquid Kernel", unreal: "PlayLiquid Kernel", osOwned: true },
+    { capability: "Spatial Identity", nativeWeb: "PlayLiquid", mobile: "PlayLiquid", unity: "adapter", unreal: "adapter", osOwned: true },
+    { capability: "Ads", nativeWeb: "PlayLiquid", mobile: "PlayLiquid", unity: "PlayLiquid", unreal: "PlayLiquid", osOwned: true },
+    { capability: "Economy", nativeWeb: "PlayLiquid", mobile: "PlayLiquid", unity: "PlayLiquid", unreal: "PlayLiquid", osOwned: true },
+    { capability: "World Identity", nativeWeb: "PlayLiquid", mobile: "PlayLiquid", unity: "PlayLiquid", unreal: "PlayLiquid", osOwned: true },
+  ],
+  // Runtime targets — the execution environments that can realize a World Build
+  runtimeTargets: [
+    { name: "PlayLiquid Web Runtime", target: "browser", status: "in-progress", note: "Canvas-based browser runtime adapter — renders the World Build using the PlayLiquid spatial protocol." },
+    { name: "PlayLiquid Mobile Runtime", target: "mobile", status: "planned", note: "iOS/Android native runtime." },
+    { name: "Unity Adapter", target: "unity", status: "planned", note: "Translates PlayLiquid Protocol → Unity scene. Unity renders; PlayLiquid owns identity, state, multiplayer." },
+    { name: "Unreal Adapter", target: "unreal", status: "planned", note: "Translates PlayLiquid Protocol → Unreal scene." },
+    { name: "Godot Adapter", target: "godot", status: "planned", note: "Translates PlayLiquid Protocol → Godot scene." },
+  ],
   roadmap: [
     { stage: "0", name: "Frozen OS Primitives", status: "done", detail: "10 primitives frozen: Package, Specification, Contract, Entity, World Project, World Build, Kernel, Runtime Adapter, World Node, World Service." },
     { stage: "1", name: "Universal Substrate", status: "in-progress", detail: "Platform guarantees: multiplayer, replication, identity, persistence, streaming, spatial, capability enforcement, economy, advertising, voice, discovery. The LLM never implements these." },

@@ -8,6 +8,7 @@ export type PanelId =
   | "worlds"
   | "build"
   | "runtime"
+  | "nodes"
   | "console"
   | "capabilities"
   | "services"

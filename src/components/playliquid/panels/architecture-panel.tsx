@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   Circle,
   Loader2,
+  Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -322,6 +323,99 @@ export function ArchitecturePanel() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* PlayLiquid Protocol */}
+      {arch.playliquidProtocol && (
+        <Card className="border-primary/30 bg-primary/[0.03]">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Radio className="h-4 w-4 text-primary" />
+              The PlayLiquid Protocol — Cross-Engine World Interoperability
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-xs text-muted-foreground">{arch.playliquidProtocol.description}</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {arch.playliquidProtocol.layers.map((l) => (
+                <div key={l.contract} className="rounded-md border border-border/60 bg-background/40 p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-foreground">{l.name}</span>
+                    <Badge variant="outline" className="ml-auto font-mono text-[9px] text-primary/70">{l.contract}</Badge>
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{l.role}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Capability Matrix */}
+      {arch.capabilityMatrix && (
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">
+            Capability Matrix — OS vs Engine
+          </h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            The engine is an implementation detail. <span className="text-emerald-300">Green = PlayLiquid OS</span> (never engine); <span className="text-muted-foreground">gray = engine-specific</span>.
+          </p>
+          <Card className="overflow-hidden border-border bg-card/40">
+            <div className="overflow-x-auto scroll-thin">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30">
+                    <th className="p-2 text-left font-medium text-muted-foreground">Capability</th>
+                    <th className="p-2 text-left font-medium text-muted-foreground">Web</th>
+                    <th className="p-2 text-left font-medium text-muted-foreground">Mobile</th>
+                    <th className="p-2 text-left font-medium text-muted-foreground">Unity</th>
+                    <th className="p-2 text-left font-medium text-muted-foreground">Unreal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {arch.capabilityMatrix.map((row) => (
+                    <tr key={row.capability} className="border-b border-border/40">
+                      <td className="p-2 font-medium text-foreground/80">{row.capability}</td>
+                      {[row.nativeWeb, row.mobile, row.unity, row.unreal].map((val, i) => (
+                        <td key={i} className="p-2">
+                          <span className={`font-mono text-[10px] ${row.osOwned ? "text-emerald-300" : "text-muted-foreground"}`}>
+                            {val}
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Runtime Targets */}
+      {arch.runtimeTargets && (
+        <div>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Runtime Targets</h3>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {arch.runtimeTargets.map((t) => {
+              const statusCls: Record<string, string> = {
+                "in-progress": "border-amber-500/30 bg-amber-500/10 text-amber-300",
+                planned: "border-zinc-500/30 bg-zinc-500/10 text-zinc-400",
+                production: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+              };
+              return (
+                <div key={t.target} className="rounded-md border border-border/60 bg-background/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold">{t.name}</span>
+                    <Badge variant="outline" className={`text-[9px] uppercase ${statusCls[t.status] ?? statusCls.planned}`}>{t.status}</Badge>
+                  </div>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">target: {t.target}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{t.note}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Roadmap */}

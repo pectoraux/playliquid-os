@@ -10,6 +10,7 @@ import { RegistryPanel } from "@/components/playliquid/panels/registry-panel";
 import { WorldsPanel } from "@/components/playliquid/panels/worlds-panel";
 import { BuildPanel } from "@/components/playliquid/panels/build-panel";
 import { RuntimePanel } from "@/components/playliquid/panels/runtime-panel";
+import { NodesPanel } from "@/components/playliquid/panels/nodes-panel";
 import { ConsolePanel } from "@/components/playliquid/panels/console-panel";
 import { CapabilitiesPanel } from "@/components/playliquid/panels/capabilities-panel";
 import { ServicesPanel } from "@/components/playliquid/panels/services-panel";
@@ -28,6 +29,7 @@ import {
   LogOut,
   ChevronDown,
   GitPullRequest,
+  Monitor,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
@@ -39,8 +41,9 @@ const NAV: Array<{ id: PanelId; label: string; icon: React.ComponentType<{ class
   { id: "worlds", label: "Worlds", icon: Globe, desc: "World Projects" },
   { id: "build", label: "Build", icon: Sparkles, desc: "Compose a World Build" },
   { id: "capabilities", label: "Capabilities", icon: Shield, desc: "Multi-layer negotiation (Superman)" },
-  { id: "runtime", label: "Runtime", icon: Server, desc: "Nodes · Entities · Kernel" },
-  { id: "services", label: "Services", icon: Server, desc: "OS substrate — never LLM" },
+  { id: "runtime", label: "Runtime", icon: Monitor, desc: "Browser-native world runtime" },
+  { id: "nodes", label: "Nodes", icon: Server, desc: "World Nodes · Kernel · Events" },
+  { id: "services", label: "Services", icon: Shield, desc: "OS substrate — never LLM" },
   { id: "contributions", label: "Contributions", icon: GitPullRequest, desc: "GitHub for Worlds" },
   { id: "console", label: "Console", icon: Terminal, desc: "Natural language → Package" },
   { id: "admin", label: "Admin", icon: Shield, desc: "Waitlist approvals", adminOnly: true },
@@ -153,6 +156,7 @@ function Console() {
           {panel === "build" && <BuildPanel />}
           {panel === "capabilities" && <CapabilitiesPanel />}
           {panel === "runtime" && <RuntimePanel />}
+          {panel === "nodes" && <NodesPanel />}
           {panel === "services" && <ServicesPanel />}
           {panel === "contributions" && <ContributionsPanel />}
           {panel === "console" && <ConsolePanel />}

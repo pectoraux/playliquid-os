@@ -209,6 +209,19 @@ export interface ArchitectureManifest {
     rule: string;
     examples: Array<{ capability: string; belongs: string; reason: string }>;
   };
+  playliquidProtocol?: {
+    description: string;
+    layers: Array<{ name: string; contract: string; role: string }>;
+  };
+  capabilityMatrix?: Array<{
+    capability: string;
+    nativeWeb: string;
+    mobile: string;
+    unity: string;
+    unreal: string;
+    osOwned: boolean;
+  }>;
+  runtimeTargets?: Array<{ name: string; target: string; status: string; note: string }>;
   roadmap?: Array<{ stage: string; name: string; status: string; detail: string }>;
 }
 
