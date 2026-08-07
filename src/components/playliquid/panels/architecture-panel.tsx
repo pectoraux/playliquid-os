@@ -256,18 +256,32 @@ export function ArchitecturePanel() {
           </h3>
           <p className="mb-3 text-xs text-muted-foreground">
             PlayLiquid provides these. Packages <span className="text-foreground">consume</span> them. The LLM <span className="text-foreground">never</span> implements them.
+            Each is honestly labeled: <span className="text-zinc-400">contract-only</span>, <span className="text-amber-300">simulator</span>, <span className="text-sky-300">partial</span>, or <span className="text-emerald-300">production</span>.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
-            {arch.substrateGuarantees.map((g) => (
-              <div key={g.contract} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
-                <div className="flex items-center gap-2">
-                  <Shield className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                  <span className="text-xs font-semibold text-foreground">{g.name}</span>
-                  <Badge variant="outline" className="ml-auto font-mono text-[9px] text-emerald-300/70">{g.contract}</Badge>
+            {arch.substrateGuarantees.map((g) => {
+              const statusCls: Record<string, string> = {
+                "contract-only": "border-zinc-500/20 bg-zinc-500/[0.04] text-zinc-400",
+                simulator: "border-amber-500/20 bg-amber-500/[0.04] text-amber-300",
+                partial: "border-sky-500/20 bg-sky-500/[0.04] text-sky-300",
+                production: "border-emerald-500/20 bg-emerald-500/[0.04] text-emerald-300",
+              };
+              const impl = g.implementationStatus ?? "contract-only";
+              return (
+                <div key={g.contract} className={`rounded-md border p-3 ${statusCls[impl] ?? statusCls["contract-only"]}`}>
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-xs font-semibold text-foreground">{g.name}</span>
+                    <Badge variant="outline" className="ml-auto font-mono text-[9px] opacity-70">{g.contract}</Badge>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{g.guarantee}</p>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <span className={`font-mono text-[9px] uppercase ${statusCls[impl]?.split(" ").find((c) => c.startsWith("text")) ?? "text-zinc-400"}`}>{impl}</span>
+                    {g.note && <span className="text-[9px] text-muted-foreground/60">— {g.note}</span>}
+                  </div>
                 </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{g.guarantee}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -271,6 +271,8 @@ export function mapWorldService(s: {
   contract: string;
   provider: string;
   status: string;
+  implementationStatus: string;
+  implementationNote: string;
   config: string;
   createdAt: Date;
   updatedAt: Date;
@@ -284,6 +286,8 @@ export function mapWorldService(s: {
     contract: safeParse(s.contract, {}),
     provider: s.provider,
     status: s.status,
+    implementationStatus: s.implementationStatus,
+    implementationNote: s.implementationNote,
     config: safeParse(s.config, {}),
     createdAt: s.createdAt.toISOString(),
     updatedAt: s.updatedAt.toISOString(),

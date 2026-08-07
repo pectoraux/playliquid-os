@@ -9,7 +9,6 @@ import type {
   WorldNodeRecord,
   EntityRecord,
   KernelEventRecord,
-  ResolveResult,
   ReusePolicy,
   Family,
 } from "@/lib/playliquid/types";
@@ -112,17 +111,7 @@ export function useCreateWorldProject() {
   });
 }
 
-// ── Resolve & Compose ─────────────────────────────────────────────
-export function useResolve() {
-  return useMutation({
-    mutationFn: (body: {
-      specificationId: string;
-      worldProjectId?: string;
-      reusePolicy: ReusePolicy;
-    }) => api.post<ResolveResult>("/api/resolve", body),
-  });
-}
-
+// ── Compose ───────────────────────────────────────────────────────
 export function useCompose() {
   const qc = useQueryClient();
   return useMutation({

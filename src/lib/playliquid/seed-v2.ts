@@ -9,6 +9,7 @@ async function main() {
   console.log("Seeding Playliquid OS v2 (World Services + Capability Policies + Spatial Slots)…");
 
   // ── World Services (Primitive #10) ──────────────────────────────
+  // Each service is honestly labeled with implementationStatus.
   const services = [
     {
       name: "playliquid.multiplayer",
@@ -17,6 +18,8 @@ async function main() {
       category: "networking",
       contract: { provides: ["kernel.replication", "kernel.sessions"], requires: ["kernel.networking"] },
       provider: "playliquid",
+      implementationStatus: "contract-only",
+      implementationNote: "No real client sessions, transport, or replication yet. Kernel is a single-process simulator.",
     },
     {
       name: "playliquid.streaming",
@@ -25,6 +28,8 @@ async function main() {
       category: "streaming",
       contract: { provides: ["kernel.streaming", "kernel.spatial"], requires: ["kernel.scheduler"] },
       provider: "playliquid",
+      implementationStatus: "contract-only",
+      implementationNote: "No spatial partitioning, cell loading, or interest management yet.",
     },
     {
       name: "playliquid.persistence",
@@ -33,6 +38,8 @@ async function main() {
       category: "persistence",
       contract: { provides: ["kernel.persistence"], requires: [] },
       provider: "playliquid",
+      implementationStatus: "simulator",
+      implementationNote: "State persists in Neon Postgres; no adapter abstraction yet.",
     },
     {
       name: "playliquid.identity",
@@ -41,6 +48,8 @@ async function main() {
       category: "identity",
       contract: { provides: ["identity.sessions", "identity.tokens"], requires: [] },
       provider: "playliquid",
+      implementationStatus: "partial",
+      implementationNote: "NextAuth credentials provider exists for the console; not yet a world-player identity system.",
     },
     {
       name: "playliquid.voice",
@@ -49,6 +58,8 @@ async function main() {
       category: "voice",
       contract: { provides: ["voice.spatial", "voice.channels"], requires: ["kernel.networking"] },
       provider: "playliquid",
+      implementationStatus: "contract-only",
+      implementationNote: "No voice transport.",
     },
     {
       name: "playliquid.ads",
@@ -57,6 +68,8 @@ async function main() {
       category: "ads",
       contract: { provides: ["ads.surfaces", "ads.auction"], requires: ["identity.sessions"] },
       provider: "playliquid",
+      implementationStatus: "contract-only",
+      implementationNote: "No ad network adapter, auction, or billing.",
     },
     {
       name: "playliquid.economy",
@@ -65,6 +78,8 @@ async function main() {
       category: "economy",
       contract: { provides: ["economy.wallet", "economy.tx"], requires: ["identity.sessions"] },
       provider: "playliquid",
+      implementationStatus: "contract-only",
+      implementationNote: "No wallet, currency, or transaction implementation.",
     },
   ];
 
@@ -78,6 +93,8 @@ async function main() {
         contract: JSON.stringify(s.contract),
         provider: s.provider,
         status: "ACTIVE",
+        implementationStatus: s.implementationStatus,
+        implementationNote: s.implementationNote,
         config: JSON.stringify({}),
       },
       create: {
@@ -88,6 +105,8 @@ async function main() {
         contract: JSON.stringify(s.contract),
         provider: s.provider,
         status: "ACTIVE",
+        implementationStatus: s.implementationStatus,
+        implementationNote: s.implementationNote,
         config: JSON.stringify({}),
       },
     });

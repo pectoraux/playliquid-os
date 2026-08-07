@@ -99,14 +99,64 @@ export async function spawnEntity(input: {
   return entity;
 }
 
-// ── Capability System ─────────────────────────────────────────────
-export async function invokeCapability(entityId: string, capability: string) {
+// ── Capability System (item 6: enforcement goes through the Kernel) ──
+// There is NO direct path from entity → capability → execution. Every
+// capability invocation must pass through this Kernel gate, which:
+//   1. loads the entity's package
+//   2. runs multi-layer capability negotiation
+//   3. emits a capability.invoke event with the negotiated result
+//   4. returns ALLOW / DENY / LIMIT — the caller must respect this
+export async function invokeCapability(
+  entityId: string,
+  capability: string,
+  context?: { worldProjectId?: string; zoneName?: string; experienceName?: string }
+) {
+  const entity = await db.entity.findUnique({
+    where: { id: entityId },
+    include: { package: { include: { provides: true, requires: true } } },
+  });
+  if (!entity) {
+    const ev = await emitEvent("capability.invoke", { entityId, capability, granted: false, reason: "entity not found" }, entityId);
+    return { granted: false, action: "deny" as const, event: ev };
+  }
+
+  // If no world context is provided, we cannot negotiate — deny by default.
+  // This is the enforcement boundary: the Kernel NEVER assumes a capability
+  // is granted without checking the policies.
+  if (!context?.worldProjectId) {
+    const ev = await emitEvent("capability.invoke", { entityId, capability, granted: false, reason: "no world context — Kernel cannot negotiate without policies" }, entityId);
+    return { granted: false, action: "deny" as const, event: ev };
+  }
+
+  const { negotiateCapabilities } = await import("./capability-engine");
+  const { mapPackage } = await import("./mappers");
+  const effective = await negotiateCapabilities({
+    pkg: mapPackage(entity.package),
+    worldProjectId: context.worldProjectId,
+    zoneName: context.zoneName,
+    experienceName: context.experienceName,
+  });
+
+  const result = effective.find((e) => e.capability === capability);
+  if (!result) {
+    // The capability isn't declared by the package — deny.
+    const ev = await emitEvent("capability.invoke", { entityId, capability, granted: false, reason: "capability not declared by package" }, entityId);
+    return { granted: false, action: "deny" as const, event: ev };
+  }
+
   const ev = await emitEvent(
     "capability.invoke",
-    { entityId, capability, granted: true },
+    {
+      entityId,
+      capability,
+      granted: result.granted,
+      action: result.action,
+      limitedBy: result.limitedBy?.layer,
+      layers: result.layers.map((l) => `${l.layer}:${l.action}`),
+    },
     entityId
   );
-  return ev;
+  return { granted: result.granted, action: result.action, event: ev, effective: result };
 }
 
 // ── World Node lifecycle (Runtime Adapter boundary) ───────────────

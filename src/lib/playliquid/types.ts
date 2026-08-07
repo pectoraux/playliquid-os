@@ -204,7 +204,7 @@ export interface ArchitectureManifest {
     llmImplements: string[];
   };
   kernelServices?: Array<{ name: string; contract: string; role: string }>;
-  substrateGuarantees?: Array<{ name: string; contract: string; guarantee: string }>;
+  substrateGuarantees?: Array<{ name: string; contract: string; guarantee: string; implementationStatus?: string; note?: string }>;
   operationalTest?: {
     rule: string;
     examples: Array<{ capability: string; belongs: string; reason: string }>;
@@ -224,18 +224,6 @@ export interface CompiledPrompt {
   prompt: string;
 }
 
-export interface ResolveResult {
-  reused: PackageRecord[];
-  generated: PackageRecord[];
-  missing: SpecificationRecord[];
-}
-
-export type ReusePolicy =
-  | "reuse-all"
-  | "reuse-infrastructure-only"
-  | "reuse-none"
-  | "auto";
-
 // ── Primitive #10: World Service ──────────────────────────────────
 export interface WorldServiceRecord {
   id: string;
@@ -246,6 +234,8 @@ export interface WorldServiceRecord {
   contract: Record<string, unknown>;
   provider: string;
   status: string;
+  implementationStatus: string; // contract-only | simulator | partial | production
+  implementationNote: string;
   config: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;

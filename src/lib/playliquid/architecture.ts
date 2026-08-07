@@ -91,12 +91,14 @@ export const ARCHITECTURE: ArchitectureManifest = {
     },
   ],
   laws: [
+    "A World Project defines what is desired; the PlayLiquid OS determines how that desire can become an operational world.",
     "PlayLiquid is responsible for making packages operational; creators are responsible only for specifying the behavior and implementation of their packages.",
     "If a capability is fundamental to operating a virtual world, it belongs in the PlayLiquid OS substrate rather than in an individual package. (Multiplayer? OS. Streaming? OS. Replication? OS. Identity? OS. Ads? OS service. Payments? OS service. Capability enforcement? Kernel. Spatial composition? OS contract. Hosting? World Node. World-specific behavior? Package. World-specific content? Package. New sensory technology? Runtime Adapter / World Service extension. LLM? Implementation backend chosen by the user.)",
     "No future feature may introduce a fundamental object that bypasses Package, Specification, Contract, Entity, World Project, World Build, Kernel, Runtime Adapter, World Node, or World Service.",
-    "The user's LLM implements PACKAGES against OS contracts. It NEVER implements OS substrate (multiplayer, networking, replication, streaming, persistence, capability enforcement, platform services).",
+    "The user's LLM implements PACKAGES against OS contracts. It NEVER implements OS substrate (multiplayer, networking, replication, streaming, persistence, capability enforcement, platform services). PlayLiquid knows nothing about which LLM is active — it knows only the LLMProviderAdapter contract.",
     "No future feature should require PlayLiquid to own the user's implementation model, LLM, or hosting infrastructure.",
     "A package must remain reusable across worlds. Worlds layer capability policies on top — they do not modify packages. (Superman can fly in 500 worlds and be grounded in 501 without 501 implementations.)",
+    "A substrate contract existing is not the same as a substrate implementation existing. Each OS guarantee is honestly labeled: contract-only, simulator, partial, or production.",
   ],
   // The critical OS-substrate-vs-LLM-implementation distinction
   substrate: {
@@ -166,18 +168,23 @@ export const ARCHITECTURE: ArchitectureManifest = {
   ],
   // Stage 1 — the 11 universal substrate guarantees PlayLiquid provides.
   // A package declares it needs these; the OS supplies them. The LLM never implements them.
+  // Each guarantee is honestly labeled with its implementation status:
+  //   contract-only = the contract is frozen, no implementation yet
+  //   simulator     = a simulator/prototype implementation exists
+  //   partial       = some real implementation exists, not production-ready
+  //   production    = production-ready
   substrateGuarantees: [
-    { name: "Multiplayer", contract: "multiplayer.session", guarantee: "Players connect, see each other, share state. Packages never implement transport or replication." },
-    { name: "Replication", contract: "multiplayer.replication", guarantee: "Authoritative state → interested clients. Automatic for every entity spawned from a package." },
-    { name: "Identity", contract: "identity.player", guarantee: "Player identity, sessions, capability tokens. Packages consume identity; they don't build auth." },
-    { name: "Persistence", contract: "kernel.persistence", guarantee: "World and entity state survives restart. Adapter-based (Postgres/IPFS/local)." },
-    { name: "Streaming", contract: "kernel.streaming", guarantee: "Loads/unloads spatial cells based on player interest. Packages declare bounds + LOD; the OS handles the rest." },
-    { name: "Spatial Services", contract: "kernel.spatial", guarantee: "Cells, regions, interest management, handoff between World Nodes." },
-    { name: "Capability Enforcement", contract: "kernel.capabilities", guarantee: "Multi-layer negotiation: entity × world × zone × experience = effective. The Kernel enforces, not the package." },
-    { name: "Economy", contract: "economy.wallet", guarantee: "Currency, transactions, wallets. Platform service; worlds opt in." },
-    { name: "Advertising", contract: "ads.surfaces", guarantee: "Ad placements, auctions, billing, frequency caps. Worlds declare ad policy; the OS handles the machinery." },
-    { name: "Voice", contract: "voice.spatial", guarantee: "Spatial voice chat. Platform-provided; worlds opt in." },
-    { name: "Discovery", contract: "discovery.worlds", guarantee: "Worlds are discoverable, addressable, linkable. Hosting is an implementation detail." },
+    { name: "Multiplayer", contract: "multiplayer.session", guarantee: "Players connect, see each other, share state. Packages never implement transport or replication.", implementationStatus: "contract-only", note: "No real client sessions, transport, or replication yet. Kernel is a single-process simulator." },
+    { name: "Replication", contract: "multiplayer.replication", guarantee: "Authoritative state → interested clients. Automatic for every entity spawned from a package.", implementationStatus: "contract-only", note: "State is written to PostgreSQL but not replicated to clients." },
+    { name: "Identity", contract: "identity.player", guarantee: "Player identity, sessions, capability tokens. Packages consume identity; they don't build auth.", implementationStatus: "partial", note: "NextAuth credentials provider exists for the console; not yet a world-player identity system." },
+    { name: "Persistence", contract: "kernel.persistence", guarantee: "World and entity state survives restart. Adapter-based (Postgres/IPFS/local).", implementationStatus: "simulator", note: "State persists in Neon Postgres; no adapter abstraction yet." },
+    { name: "Streaming", contract: "kernel.streaming", guarantee: "Loads/unloads spatial cells based on player interest. Packages declare bounds + LOD; the OS handles the rest.", implementationStatus: "contract-only", note: "No spatial partitioning, cell loading, or interest management yet." },
+    { name: "Spatial Services", contract: "kernel.spatial", guarantee: "Cells, regions, interest management, handoff between World Nodes.", implementationStatus: "contract-only", note: "SpatialSlot model exists with formal contracts; no runtime spatial authority." },
+    { name: "Capability Enforcement", contract: "kernel.capabilities", guarantee: "Multi-layer negotiation: entity × world × zone × experience = effective. The Kernel enforces, not the package.", implementationStatus: "partial", note: "Negotiation engine works; Kernel gate now enforces (no direct path to execution)." },
+    { name: "Economy", contract: "economy.wallet", guarantee: "Currency, transactions, wallets. Platform service; worlds opt in.", implementationStatus: "contract-only", note: "No wallet, currency, or transaction implementation." },
+    { name: "Advertising", contract: "ads.surfaces", guarantee: "Ad placements, auctions, billing, frequency caps. Worlds declare ad policy; the OS handles the machinery.", implementationStatus: "contract-only", note: "No ad network adapter, auction, or billing." },
+    { name: "Voice", contract: "voice.spatial", guarantee: "Spatial voice chat. Platform-provided; worlds opt in.", implementationStatus: "contract-only", note: "No voice transport." },
+    { name: "Discovery", contract: "discovery.worlds", guarantee: "Worlds are discoverable, addressable, linkable. Hosting is an implementation detail.", implementationStatus: "partial", note: "World projects are listable via API; no federation or node discovery." },
   ],
   // The operational test — a decision rule for "is this OS or Package?"
   operationalTest: {

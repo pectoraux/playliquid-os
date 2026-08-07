@@ -50,19 +50,22 @@ model Package {
 // Capability families. Packages provide / require them. The Composer wires.
 // ════════════════════════════════════════════════════════════════
 model Interface {
-  id          String  @id @default(cuid())
-  name        String  // e.g. "spatial.anchor", "avatar.movement"
-  family      String  // e.g. "spatial", "avatar", "physics", "sensory"
-  version     String
-  direction   String  // "provides" | "requires"
-  schema      String  // JSON schema describing the contract
-  description String
+  id            String  @id @default(cuid())
+  name          String  // e.g. "spatial.anchor", "avatar.movement"
+  family        String  // e.g. "spatial", "avatar", "physics", "sensory"
+  version       String  // semver of THIS contract instance
+  minCompatible String  @default("0.0.0") // minimum version this interface is compatible with
+  direction     String  // "provides" | "requires"
+  schema        String  // JSON schema describing the contract
+  description   String
 
   packageProvidedById String?
   packageProvidedBy   Package? @relation("PackageProvides", fields: [packageProvidedById], references: [id], onDelete: Cascade)
 
   packageRequiredById String?
   packageRequiredBy   Package? @relation("PackageRequires", fields: [packageRequiredById], references: [id], onDelete: Cascade)
+
+  @@index([name, version])
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -106,6 +109,9 @@ model WorldProject {
   capabilityPolicies CapabilityPolicy[]
   spatialSlots SpatialSlot[]
   contributions Contribution[]
+  branches WorldBranch[]
+  commits WorldCommit[]
+  pullRequests PullRequest[]
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -118,7 +124,10 @@ model WorldBuild {
   worldProjectId String
   worldProject   WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
   manifest       String   // immutable JSON: package versions, resolved deps, interface connections, spatial graph, capability policies, runtime config
+  manifestLock   String   @default("{}") // JSON: content-addressed lock — exact package hashes + interface versions, the sole immutable executable artifact
   hash           String   @unique
+  branchName     String   @default("main") // which branch this build was composed from
+  commitHash     String?  // the head commit this build was composed from
   status         String   // "draft" | "composed" | "ready"
   createdAt      DateTime @default(now())
 
@@ -281,17 +290,20 @@ model VerificationToken {
 // packages consume them through Contracts.
 // ════════════════════════════════════════════════════════════════
 model WorldService {
-  id          String   @id @default(cuid())
-  name        String   @unique // e.g. "playliquid.multiplayer", "playliquid.streaming"
-  displayName String
-  description String
-  category    String   // "networking" | "persistence" | "streaming" | "voice" | "ads" | "identity" | "analytics" | "moderation" | "economy" | "storage"
-  contract    String   // JSON: the contract this service fulfills
-  provider    String   // "playliquid" | "vercel" | "cloudflare" | "custom"
-  status      String   @default("ACTIVE") // ACTIVE | DRAFT | DEPRECATED
-  config      String   // JSON: service configuration
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  name                String   @unique // e.g. "playliquid.multiplayer", "playliquid.streaming"
+  displayName         String
+  description         String
+  category            String   // "networking" | "persistence" | "streaming" | "voice" | "ads" | "identity" | "analytics" | "moderation" | "economy" | "storage"
+  contract            String   // JSON: the contract this service fulfills
+  provider            String   // "playliquid" | "vercel" | "cloudflare" | "custom"
+  status              String   @default("ACTIVE") // ACTIVE | DRAFT | DEPRECATED
+  // ── item 7: honest status — contract vs implementation ──
+  implementationStatus String  @default("contract-only") // contract-only | simulator | partial | production
+  implementationNote  String   @default("") // human-readable note on what the implementation actually does
+  config              String   // JSON: service configuration
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   // which world projects have enabled this service
   enabledIn WorldServiceBinding[]
@@ -355,6 +367,13 @@ model SpatialSlot {
   bounds          String   // JSON: { x, y, z, w, h, d }
   acceptedFamilies String  // JSON array of package families this slot accepts
   capacity        Int?     // max packages that can attach (null = unlimited)
+  // ── Formal spatial contract fields (item 5) ──
+  coordinateSystem String  @default("cartesian-meters") // how bounds are interpreted
+  scale           String   @default("medium") // "small" | "medium" | "large" | "planetary"
+  adjacency       String   @default("[]") // JSON: names of slots this slot is adjacent to
+  containment     String   @default("[]") // JSON: names of slots this slot contains (parent → children)
+  attachmentPoints String  @default("[]") // JSON: named attachment points [{ name, position, direction }]
+  topology        String   @default("mesh") // "mesh" | "linear" | "tree" | "graph"
   createdAt       DateTime @default(now())
 
   @@unique([worldProjectId, name])
@@ -384,4 +403,64 @@ model Contribution {
   createdAt       DateTime @default(now())
 
   @@index([worldProjectId, status])
+}
+
+// ════════════════════════════════════════════════════════════════
+// WORLD PROJECT BRANCHES & COMMITS — Git-like version control
+// (item 8: Turn World Projects into genuinely Git-like repositories)
+// ════════════════════════════════════════════════════════════════
+model WorldBranch {
+  id              String   @id @default(cuid())
+  worldProjectId  String
+  worldProject    WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
+  name            String   // "main" | "paris-reconstruction" | "contributor/alice"
+  parentBranchId  String?  // the branch this was forked from
+  headCommitId    String?  // the latest commit on this branch
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  commits   WorldCommit[]
+  pullReqs  PullRequest[] @relation("PRSourceBranch")
+  targetPRs PullRequest[] @relation("PRTargetBranch")
+
+  @@unique([worldProjectId, name])
+}
+
+model WorldCommit {
+  id              String   @id @default(cuid())
+  worldProjectId  String
+  worldProject    WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
+  branchId        String
+  branch          WorldBranch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  parentCommitId  String?  // previous commit (forms the history graph)
+  hash            String   @unique // content hash of the commit
+  authorName      String
+  message         String
+  // the commit payload: the package manifest state at this commit
+  packageManifest String   // JSON array of package names
+  spatialSlots    String   // JSON: snapshot of spatial slots at this commit
+  policies        String   // JSON: capability policies at this commit
+  createdAt       DateTime @default(now())
+
+  @@index([branchId, createdAt])
+}
+
+model PullRequest {
+  id                  String   @id @default(cuid())
+  worldProjectId      String
+  worldProject        WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
+  title               String
+  description         String
+  sourceBranchId      String
+  sourceBranch        WorldBranch @relation("PRSourceBranch", fields: [sourceBranchId], references: [id], onDelete: Cascade)
+  targetBranchId      String
+  targetBranch        WorldBranch @relation("PRTargetBranch", fields: [targetBranchId], references: [id], onDelete: Cascade)
+  status              String   @default("OPEN") // OPEN | MERGED | CLOSED | DRAFT
+  contributorName     String
+  reviewStatus        String   @default("PENDING") // PENDING | APPROVED | CHANGES_REQUESTED | REJECTED
+  reviewerName        String?
+  reviewedAt          DateTime?
+  mergedAt            DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }

@@ -157,6 +157,19 @@ export function ServicesPanel() {
 
 function ServiceCard({ svc }: { svc: WorldServiceRecord }) {
   const Icon = categoryIcons[svc.category] ?? Server;
+  const statusCls: Record<string, string> = {
+    "contract-only": "border-zinc-500/30 bg-zinc-500/10 text-zinc-400",
+    simulator: "border-amber-500/30 bg-amber-500/10 text-amber-300",
+    partial: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+    production: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+  };
+  const statusLabel: Record<string, string> = {
+    "contract-only": "contract only",
+    simulator: "simulator",
+    partial: "partial",
+    production: "production",
+  };
+  const implStatus = svc.implementationStatus ?? "contract-only";
   return (
     <Card className="border-border bg-card/50 transition-colors hover:border-primary/40">
       <CardContent className="p-4">
@@ -164,12 +177,17 @@ function ServiceCard({ svc }: { svc: WorldServiceRecord }) {
           <div className="flex h-9 w-9 items-center justify-center rounded-md border border-primary/20 bg-primary/10 text-primary">
             <Icon className="h-4 w-4" />
           </div>
-          <Badge variant="outline" className="font-mono text-[9px] uppercase">
-            {svc.category}
+          <Badge variant="outline" className={`font-mono text-[9px] uppercase ${statusCls[implStatus] ?? statusCls["contract-only"]}`}>
+            {statusLabel[implStatus] ?? implStatus}
           </Badge>
         </div>
         <h4 className="mt-3 text-sm font-semibold">{svc.displayName}</h4>
         <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{svc.description}</p>
+        {svc.implementationNote && (
+          <p className="mt-2 rounded border border-amber-500/20 bg-amber-500/[0.04] p-1.5 text-[10px] leading-relaxed text-amber-200/70">
+            {svc.implementationNote}
+          </p>
+        )}
         <div className="mt-3 flex items-center gap-2">
           <span className="font-mono text-[10px] text-muted-foreground">{svc.name}</span>
           <Badge variant="outline" className="ml-auto border-emerald-500/30 bg-emerald-500/10 text-[9px] text-emerald-300">

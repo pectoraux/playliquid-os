@@ -12,7 +12,7 @@
 // The provider is recorded in provenance so the same specification can later
 // be re-implemented by a different model without changing Playliquid.
 
-import { getZAI } from "./llm-client";
+import { getLLMProvider } from "./llm-provider-adapter";
 import { db } from "@/lib/db";
 import { contentHash } from "./hashing";
 import { contextForWorld } from "./resolver";
@@ -45,15 +45,14 @@ export async function nlToSpecification(
 ): Promise<{ canonical: Record<string, unknown>; specificationId: string }> {
   let canonical: Record<string, unknown>;
   try {
-    const zai = await getZAI();
-    const completion = await zai.chat.completions.create({
+    const provider = getLLMProvider();
+    const completion = await provider.completeChat({
       messages: [
-        { role: "assistant", content: SYSTEM_PROMPT },
+        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: naturalLanguage },
       ],
-      thinking: { type: "disabled" },
     });
-    const raw = completion.choices[0]?.message?.content ?? "{}";
+    const raw = completion.content;
     canonical = safeExtractJson(raw);
   } catch (err) {
     // Fallback: if the LLM provider is unreachable (e.g. the internal API
@@ -268,20 +267,23 @@ export async function runGenerationPipeline(input: {
   // 3. Generate the artifact via the user's LLM
   log.push({ step: "generating", at: stamp(), detail: "calling user's LLM" });
   let artifact: string;
+  let usedProvider = "fallback";
+  let usedModel = "rule-based";
   try {
-    const zai = await getZAI();
-    const completion = await zai.chat.completions.create({
+    const provider = getLLMProvider();
+    usedProvider = provider.name;
+    usedModel = provider.model;
+    const completion = await provider.completeChat({
       messages: [
         {
-          role: "assistant",
+          role: "system",
           content:
             "You are a Package implementer for the Playliquid OS. Implement the package described by the user. Return a concise artifact description (what it is, how it works, key code outline). Be specific but compact.",
         },
         { role: "user", content: compiled.prompt },
       ],
-      thinking: { type: "disabled" },
     });
-    artifact = completion.choices[0]?.message?.content ?? "";
+    artifact = completion.content;
   } catch (err) {
     // Fallback: if the LLM provider is unreachable, synthesize an artifact
     // from the canonical specification so the pipeline still produces a
@@ -320,8 +322,8 @@ export async function runGenerationPipeline(input: {
       artifactUri: `memory://${hash}`,
       provenance: JSON.stringify({
         generator: "llm",
-        llmProvider: "zai",
-        model: "glm",
+        llmProvider: usedProvider,
+        model: usedModel,
         generatedAt: stamp(),
         source: input.naturalLanguage,
       }),
@@ -364,7 +366,7 @@ export async function runGenerationPipeline(input: {
       input: input.naturalLanguage,
       specification: JSON.stringify(canonical),
       prompt: compiled.prompt,
-      provider: "zai",
+      provider: usedProvider,
       status: "done",
       packageId: pkg.id,
       log: JSON.stringify(log),

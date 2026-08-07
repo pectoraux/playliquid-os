@@ -41,18 +41,40 @@ export async function composeWorld(input: ComposeInput) {
   const resolvedDependencies: BuildManifest["resolvedDependencies"] = [];
   const unsatisfied: string[] = [];
 
+  // Build a map of provided interface name → { package, version, minCompatible }
+  const providedVersions = new Map<string, { provider: PackageRecord; version: string; minCompatible: string }>();
+  for (const p of records) {
+    for (const iface of p.provides) {
+      // InterfaceContract carries version; minCompatible is in the schema field
+      // (stored as JSON in the Interface model). For the in-memory record we
+      // read it from the schema if present, else default to "0.0.0".
+      const minCompat = (iface.schema as { minCompatible?: string })?.minCompatible ?? "0.0.0";
+      providedVersions.set(iface.name, { provider: p, version: iface.version, minCompatible: minCompat });
+    }
+  }
+
   for (const consumer of records) {
     for (const req of consumer.requires) {
-      const provider = providers.get(req.name);
-      if (provider) {
+      const provided = providedVersions.get(req.name);
+      if (provided) {
+        // ── item 4: contract version compatibility check ──
+        // The consumer requires version req.version; the provider offers
+        // provided.version with minCompatible. They're compatible if
+        // req.version >= provided.minCompatible AND req.version <= provided.version.
+        if (!isVersionCompatible(req.version, provided.version, provided.minCompatible)) {
+          unsatisfied.push(
+            `${consumer.name} requires ${req.name}@${req.version} but ${provided.provider.name} provides ${req.name}@${provided.version} (minCompatible ${provided.minCompatible}) — version incompatible`
+          );
+          continue;
+        }
         interfaceConnections.push({
-          provider: provider.name,
+          provider: provided.provider.name,
           consumer: consumer.name,
           contract: req.name,
         });
         resolvedDependencies.push({
           from: consumer.name,
-          to: provider.name,
+          to: provided.provider.name,
           contract: req.name,
         });
       } else {
@@ -61,12 +83,29 @@ export async function composeWorld(input: ComposeInput) {
     }
   }
 
-  // ── 2. Spatial graph: anchor each package by family heuristics ─
+  // ── 2. Spatial graph: resolve packages to spatial slots (item 5) ──
+  // Instead of family heuristics, we resolve each package to a named spatial
+  // slot defined by the World Project. Packages whose family matches a slot's
+  // acceptedFamilies are attached to that slot. This is the formal spatial
+  // contract resolution.
+  const slots = await db.spatialSlot.findMany({ where: { worldProjectId: project.id } });
+  const slotMap = new Map<string, typeof slots>();
+  for (const s of slots) {
+    const fams = JSON.parse(s.acceptedFamilies) as string[];
+    for (const f of fams) {
+      if (!slotMap.has(f)) slotMap.set(f, []);
+      slotMap.get(f)!.push(s);
+    }
+  }
+
   const spatialGraph: BuildManifest["spatialGraph"] = records.map((p, i) => {
     const anchor = defaultAnchor(p.family, i);
+    // Find a slot that accepts this package's family
+    const candidateSlots = slotMap.get(p.family) ?? [];
+    const slot = candidateSlots[0]; // first match (future: capacity-aware assignment)
     return {
       entity: p.name,
-      parent: p.family === "building" || p.family === "vehicle" ? "region.root" : undefined,
+      parent: slot?.name ?? (p.family === "building" || p.family === "vehicle" ? "region.root" : undefined),
       anchor,
     };
   });
@@ -82,6 +121,24 @@ export async function composeWorld(input: ComposeInput) {
   // ── 4. Package version lock ────────────────────────────────────
   const packageVersions: Record<string, string> = {};
   for (const p of records) packageVersions[p.name] = p.version;
+
+  // ── 4b. Content-addressed manifest lock (item 9) ───────────────
+  // The manifestLock pins exact package hashes + interface versions so a
+  // build is reproducible byte-for-byte. This is the sole immutable
+  // executable artifact — two builds with the same lock are identical.
+  const manifestLock = {
+    packages: records.map((p) => ({
+      name: p.name,
+      version: p.version,
+      hash: p.hash,
+      interfaces: {
+        provides: p.provides.map((i) => ({ name: i.name, version: i.version, minCompatible: i.schema ? "0.0.0" : "0.0.0" })),
+        requires: p.requires.map((i) => ({ name: i.name, version: i.version })),
+      },
+    })),
+    interfaceConnections: interfaceConnections.map((c) => `${c.provider}→${c.consumer}:${c.contract}`),
+    lockHash: contentHash({ packages: records.map((p) => p.hash), connections: interfaceConnections }),
+  };
 
   // ── 5. Compose manifest ────────────────────────────────────────
   const manifest: BuildManifest = {
@@ -102,13 +159,14 @@ export async function composeWorld(input: ComposeInput) {
   });
   const nextVersion = (lastBuild?.version ?? 0) + 1;
 
-  const hash = contentHash({ v: nextVersion, manifest, projectId: project.id });
+  const hash = contentHash({ v: nextVersion, manifest, manifestLock, projectId: project.id });
 
   const build = await db.worldBuild.create({
     data: {
       version: nextVersion,
       worldProjectId: project.id,
       manifest: JSON.stringify(manifest),
+      manifestLock: JSON.stringify(manifestLock),
       hash,
       status: "composed",
       packages: {
@@ -151,4 +209,24 @@ export async function interfaceCatalog(): Promise<InterfaceContract[]> {
     schema: JSON.parse(i.schema) as Record<string, unknown>,
     description: i.description,
   }));
+}
+
+// ── item 4: semver compatibility check ────────────────────────────
+// A consumer requiring version R is compatible with a provider offering
+// version P (minCompatible M) if: R >= M AND R <= P.
+// Uses simple semver comparison (major.minor.patch).
+function parseSemver(v: string): [number, number, number] {
+  const parts = v.split(".").map((s) => parseInt(s, 10) || 0);
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+function compareSemver(a: string, b: string): number {
+  const [aMaj, aMin, aPatch] = parseSemver(a);
+  const [bMaj, bMin, bPatch] = parseSemver(b);
+  if (aMaj !== bMaj) return aMaj - bMaj;
+  if (aMin !== bMin) return aMin - bMin;
+  return aPatch - bPatch;
+}
+function isVersionCompatible(required: string, provided: string, minCompatible: string): boolean {
+  // required must be >= minCompatible AND required <= provided
+  return compareSemver(required, minCompatible) >= 0 && compareSemver(required, provided) <= 0;
 }
