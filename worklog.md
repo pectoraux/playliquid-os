@@ -258,3 +258,28 @@ Stage Summary:
 - Spatial composition is now formal slot resolution, not family heuristics.
 - World Builds are content-addressed and reproducible via manifestLock.
 - World Projects have branches, commits, and PRs (Git-like version control).
+
+---
+Task ID: 6
+Agent: orchestrator (main)
+Task: Cross the runtime boundary — browser-native PlayLiquid Runtime + World Interoperability Protocol.
+
+Work Log:
+- Added two new frozen laws: Native Runtime Law (every World Build has a browser/mobile-native execution path; external engines are optional adapters) + Engine Independence Law (rendering/engine are replaceable; the world remains PlayLiquid-native).
+- Added the PlayLiquid Protocol to the architecture manifest: 7 layers (World Identity, Spatial Anchors, Entity Identity, State Sync, Event Stream, Capabilities, Contracts). This is the cross-engine interoperability protocol that prevents different engines from creating disconnected islands.
+- Added the Capability Matrix: 12-row table showing which capabilities are PlayLiquid OS (green: Multiplayer, Identity, Persistence, Capability Enforcement, Spatial Identity, Ads, Economy, World Identity) vs engine-specific (gray: Rendering, Physics, Audio, Input). This is the table that prevents Unity from implementing PlayLiquid multiplayer.
+- Added 5 Runtime Targets: PlayLiquid Web Runtime (in-progress), Mobile (planned), Unity Adapter (planned), Unreal Adapter (planned), Godot Adapter (planned).
+- Added SpatialAnchor model: semantic identity (earth.europe.netherlands.amsterdam.canal-belt), global + local coordinates, orientation (quaternion), scale, parent anchor hierarchy, coordinate system (playliquid-world), anchor type, semantic tag. Seeded 12 anchors for Amsterdam.
+- Added RuntimeArtifact model: a Package has a canonical specification (engine-independent); Runtime Artifacts are engine-specific implementations (playliquid-web, unity, unreal, godot). Seeded playliquid-web artifacts for all 10 packages.
+- Built the World Scene API (/api/runtime/:buildId/scene): returns the canonical, engine-independent scene graph — world identity, spatial anchors, entities with PlayLiquid-native identity + position + state, capability policies, runtime config, world nodes. Any runtime adapter consumes this same data.
+- Built the Browser Runtime (PlayLiquid Web Runtime): a canvas-based renderer that takes a World Build and renders it in the browser using the PlayLiquid spatial protocol. Features: entities rendered as family-colored shapes at their PlayLiquid coordinates; spatial anchors rendered as rings with semantic labels; entity inspector (click to see position/components/state); spatial anchor hierarchy panel; protocol layers display; live polling for updates. This is the native runtime — not a simulator, not a control plane.
+- Renamed the old Runtime panel (nodes/entities/kernel) to "Nodes"; the new "Runtime" panel is the browser-native world rendering.
+- Verified locally: Scene API returns 11 anchors, protocol v1.0.0, coordinate system playliquid-world. Architecture API returns 10 laws, 7 protocol layers, 12 capability matrix rows, 5 runtime targets.
+- Pushed to GitHub. Vercel deployment: the previous deploy errored due to build command; fixed the Vercel project build command to "next build" + install to "bun install". New deployment pending rate-limit reset.
+
+Stage Summary:
+- PlayLiquid has crossed the runtime boundary. It can now actually RUN a world in the browser, not just describe it server-side.
+- The browser runtime renders entities at their PlayLiquid coordinates, using the same scene graph that a Unity or Unreal adapter would consume. The engine is an implementation detail; the world is not.
+- The PlayLiquid Protocol (7 layers) makes worlds coherent across engines: World Identity, Spatial Anchors, Entity Identity, State Sync, Event Stream, Capabilities, Contracts.
+- The Capability Matrix makes it explicit: Multiplayer, Identity, Persistence, Capability Enforcement, Ads, Economy, World Identity are ALWAYS PlayLiquid OS — never engine-implemented.
+- Spatial Anchors have semantic identity (earth.europe.netherlands.amsterdam.museum-district.rijksmuseum) with global coordinates in the playliquid-world coordinate system. Unity transforms these to Unity coordinates; the browser transforms them to canvas pixels; the anchor identity stays PlayLiquid-native.
