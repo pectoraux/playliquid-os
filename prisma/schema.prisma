@@ -376,6 +376,11 @@ model SpatialSlot {
   containment     String   @default("[]") // JSON: names of slots this slot contains (parent → children)
   attachmentPoints String  @default("[]") // JSON: named attachment points [{ name, position, direction }]
   topology        String   @default("mesh") // "mesh" | "linear" | "tree" | "graph"
+  // ── Connection to SpatialAnchor (item 14) ──
+  // A slot resolves to a specific spatial anchor at composition time.
+  // This connects the composition-time slot to the runtime-time anchor,
+  // so a contributor targeting a slot gets placed at the right anchor.
+  anchorSemanticId String? // the semantic ID of the SpatialAnchor this slot resolves to
   createdAt       DateTime @default(now())
 
   @@unique([worldProjectId, name])

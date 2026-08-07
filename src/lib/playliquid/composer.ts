@@ -132,7 +132,13 @@ export async function composeWorld(input: ComposeInput) {
       version: p.version,
       hash: p.hash,
       interfaces: {
-        provides: p.provides.map((i) => ({ name: i.name, version: i.version, minCompatible: i.schema ? "0.0.0" : "0.0.0" })),
+        // Preserve the ACTUAL minCompatible from the interface schema,
+        // not a hardcoded "0.0.0". This makes the lock reproducible.
+        provides: p.provides.map((i) => ({
+          name: i.name,
+          version: i.version,
+          minCompatible: (i.schema as { minCompatible?: string })?.minCompatible ?? "0.0.0",
+        })),
         requires: p.requires.map((i) => ({ name: i.name, version: i.version })),
       },
     })),

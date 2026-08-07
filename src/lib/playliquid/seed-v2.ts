@@ -8,7 +8,7 @@ import { contentHash } from "./hashing";
 async function main() {
   console.log("Seeding Playliquid OS v2 (World Services + Capability Policies + Spatial Slots)…");
 
-  // ── World Services (Primitive #10) ──────────────────────────────
+  // ── World Services (Primitive #10) ─────────────────────────────
   // Each service is honestly labeled with implementationStatus.
   const services = [
     {

@@ -178,7 +178,7 @@ function Console() {
             <span className="text-border">·</span>
             <span>2 pipelines</span>
             <span className="text-border">·</span>
-            <span>4 laws</span>
+            <span>12 laws</span>
             <span className="text-border">·</span>
             <span className="text-primary">nothing bypasses Package</span>
           </div>

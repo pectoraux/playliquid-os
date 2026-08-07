@@ -101,6 +101,8 @@ export const ARCHITECTURE: ArchitectureManifest = {
     "A substrate contract existing is not the same as a substrate implementation existing. Each OS guarantee is honestly labeled: contract-only, simulator, partial, or production.",
     "Native Runtime Law: Every certified World Build must have a defined execution path through a PlayLiquid Runtime Adapter. The canonical PlayLiquid runtime target is browser/mobile-native execution; external engines (Unity, Unreal, Godot) are optional adapters and must not redefine the world's canonical identity, contracts, spatial model, or state model.",
     "Engine Independence Law: Rendering and engine implementation are replaceable runtime concerns. A World, Package, Entity, spatial anchor, capability, and semantic identity remain PlayLiquid-native regardless of the engine used to realize them. The engine is an implementation detail; the world is not.",
+    "Package Runtime ABI Law: Every executable package must conform to the Package Runtime ABI (initialize → mount → update → handle → render → dispose). A package interacts with the world ONLY through the KernelContext the Kernel provides. It never directly touches multiplayer, persistence, state authority, capability permissions, or networking. The browser runtime is a Package Executor, not a scene visualizer.",
+    "User-Owned LLM Law: The canonical LLM flow is user-owned. PlayLiquid produces a Specification + a compiled Prompt; the user takes the prompt to THEIR LLM (ChatGPT, Claude, Gemini, Z.ai, local) and imports the result back. PlayLiquid does not need the user's LLM API key. The server-side LLMProviderAdapter is an optional convenience, not the architectural foundation.",
   ],
   // The critical OS-substrate-vs-LLM-implementation distinction
   substrate: {
@@ -240,12 +242,59 @@ export const ARCHITECTURE: ArchitectureManifest = {
   ],
   // Runtime targets — the execution environments that can realize a World Build
   runtimeTargets: [
-    { name: "PlayLiquid Web Runtime", target: "browser", status: "in-progress", note: "Canvas-based browser runtime adapter — renders the World Build using the PlayLiquid spatial protocol." },
+    { name: "PlayLiquid Web Runtime", target: "browser", status: "in-progress", note: "Canvas-based browser runtime that loads + executes packages via the Package Runtime ABI. Not a scene visualizer — a real package executor." },
     { name: "PlayLiquid Mobile Runtime", target: "mobile", status: "planned", note: "iOS/Android native runtime." },
     { name: "Unity Adapter", target: "unity", status: "planned", note: "Translates PlayLiquid Protocol → Unity scene. Unity renders; PlayLiquid owns identity, state, multiplayer." },
     { name: "Unreal Adapter", target: "unreal", status: "planned", note: "Translates PlayLiquid Protocol → Unreal scene." },
     { name: "Godot Adapter", target: "godot", status: "planned", note: "Translates PlayLiquid Protocol → Godot scene." },
   ],
+  // The Package Runtime ABI — the frozen execution boundary
+  packageRuntimeABI: {
+    description: "Every executable package must conform to this lifecycle. The package interacts with the world ONLY through the KernelContext. This is what makes PlayLiquid an OS, not a game engine.",
+    lifecycle: [
+      { method: "initialize(ctx, manifest)", role: "Called once when loaded. Receives the KernelContext + manifest." },
+      { method: "mount()", role: "Called when mounted on an entity." },
+      { method: "update(delta)", role: "Called every tick. Updates state — never touches the render surface." },
+      { method: "handle(event, payload)", role: "Called when a world event reaches this entity." },
+      { method: "render(rc)", role: "Draws into the RenderContext provided by the Runtime Adapter. Never owns the canvas." },
+      { method: "dispose()", role: "Called when unmounted." },
+    ],
+    kernelContext: [
+      { method: "getPosition()", role: "Read entity position (server-authoritative)." },
+      { method: "requestMovement(delta)", role: "Request movement — Kernel may deny based on capability policy." },
+      { method: "getState() / setState(patch)", role: "Read/write entity state. Kernel persists + replicates." },
+      { method: "emit(event, payload) / on(event, handler)", role: "Events — Kernel routes; package never touches transport." },
+      { method: "invokeCapability(capability)", role: "Request a capability. Kernel negotiates (entity × world × zone × experience). No direct path to execution." },
+      { method: "requestService(service, action)", role: "Request an OS service (multiplayer, persistence, ads...). Package consumes; never implements." },
+      { method: "log(level, message)", role: "Observability — Kernel routes logs." },
+    ],
+    whatPackagesCannotTouch: [
+      "multiplayer / networking / replication",
+      "other players",
+      "persistence internals",
+      "world authority",
+      "capability permissions (only request via invokeCapability)",
+      "spatial identity (only read via getPosition)",
+      "ads / economy / identity (only via requestService)",
+    ],
+  },
+  // The user-owned LLM boundary
+  userLLMBoundary: {
+    description: "The canonical LLM flow is user-owned. PlayLiquid produces a Specification + compiled Prompt; the user takes the prompt to their LLM and imports the result back. The server-side adapter is optional convenience.",
+    flow: [
+      { step: "1. NL → Specification", owner: "PlayLiquid (AI Architect)", note: "The OS owns the canonical specification." },
+      { step: "2. Compile Prompt", owner: "PlayLiquid", note: "The OS compiles a precise implementation request." },
+      { step: "3. Open in user's LLM", owner: "User", note: "ChatGPT / Claude / Gemini / Z.ai / local — user's choice, user's API key." },
+      { step: "4. Generate implementation", owner: "User's LLM", note: "The user's LLM produces the package artifact." },
+      { step: "5. Import back", owner: "User → PlayLiquid", note: "User pastes the result; PlayLiquid certifies + registers." },
+    ],
+    openTargets: [
+      { name: "ChatGPT", url: "https://chat.openai.com/" },
+      { name: "Claude", url: "https://claude.ai/" },
+      { name: "Gemini", url: "https://gemini.google.com/" },
+      { name: "Z.ai", url: "https://chat.z.ai/" },
+    ],
+  },
   roadmap: [
     { stage: "0", name: "Frozen OS Primitives", status: "done", detail: "10 primitives frozen: Package, Specification, Contract, Entity, World Project, World Build, Kernel, Runtime Adapter, World Node, World Service." },
     { stage: "1", name: "Universal Substrate", status: "in-progress", detail: "Platform guarantees: multiplayer, replication, identity, persistence, streaming, spatial, capability enforcement, economy, advertising, voice, discovery. The LLM never implements these." },

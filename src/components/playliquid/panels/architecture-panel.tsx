@@ -64,7 +64,7 @@ export function ArchitecturePanel() {
               Frozen Architecture
             </CardTitle>
             <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
-              9 primitives · immutable
+              10 primitives · immutable
             </Badge>
           </div>
         </CardHeader>
@@ -416,6 +416,94 @@ export function ArchitecturePanel() {
             })}
           </div>
         </div>
+      )}
+
+      {/* Package Runtime ABI */}
+      {arch.packageRuntimeABI && (
+        <Card className="border-primary/30 bg-primary/[0.03]">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Cpu className="h-4 w-4 text-primary" />
+              Package Runtime ABI — the execution boundary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-xs text-muted-foreground">{arch.packageRuntimeABI.description}</p>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div>
+                <h4 className="mb-2 text-xs font-semibold text-foreground">Lifecycle (frozen)</h4>
+                <div className="space-y-1">
+                  {arch.packageRuntimeABI.lifecycle.map((l) => (
+                    <div key={l.method} className="flex items-start gap-2 text-xs">
+                      <code className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary">{l.method}</code>
+                      <span className="text-muted-foreground">{l.role}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h4 className="mb-2 text-xs font-semibold text-foreground">KernelContext (what the Kernel exposes)</h4>
+                <div className="space-y-1">
+                  {arch.packageRuntimeABI.kernelContext.map((k) => (
+                    <div key={k.method} className="flex items-start gap-2 text-xs">
+                      <code className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">{k.method}</code>
+                      <span className="text-muted-foreground">{k.role}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 rounded-md border border-rose-500/20 bg-rose-500/[0.04] p-2.5">
+              <p className="mb-1 text-[10px] font-semibold uppercase text-rose-400">Packages CANNOT touch</p>
+              <div className="flex flex-wrap gap-1">
+                {arch.packageRuntimeABI.whatPackagesCannotTouch.map((w) => (
+                  <Badge key={w} variant="outline" className="border-rose-500/30 bg-rose-500/10 font-mono text-[9px] text-rose-300">
+                    {w}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* User-Owned LLM Boundary */}
+      {arch.userLLMBoundary && (
+        <Card className="border-amber-500/20 bg-amber-500/[0.03]">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Shield className="h-4 w-4 text-amber-400" />
+              User-Owned LLM Boundary
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-xs text-muted-foreground">{arch.userLLMBoundary.description}</p>
+            <div className="space-y-1">
+              {arch.userLLMBoundary.flow.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-amber-500/30 bg-amber-500/10 font-mono text-[9px] text-amber-300">{i + 1}</span>
+                  <span className="font-medium text-foreground/80">{f.step}</span>
+                  <span className="text-muted-foreground">→ {f.owner}</span>
+                  <span className="ml-auto text-[10px] text-muted-foreground/60">{f.note}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <span className="text-[10px] text-muted-foreground">Open prompt in:</span>
+              {arch.userLLMBoundary.openTargets.map((t) => (
+                <a
+                  key={t.name}
+                  href={t.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-md border border-border bg-background/40 px-2 py-0.5 font-mono text-[10px] text-foreground/70 transition-colors hover:border-primary/40 hover:text-primary"
+                >
+                  {t.name} ↗
+                </a>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Roadmap */}

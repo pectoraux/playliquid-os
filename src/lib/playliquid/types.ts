@@ -1,5 +1,5 @@
 // Playliquid OS — Core Type Definitions
-// Canonical shapes for the 9 frozen primitives.
+// Canonical shapes for the 10 frozen primitives.
 
 export type Family =
   | "avatar"
@@ -222,6 +222,17 @@ export interface ArchitectureManifest {
     osOwned: boolean;
   }>;
   runtimeTargets?: Array<{ name: string; target: string; status: string; note: string }>;
+  packageRuntimeABI?: {
+    description: string;
+    lifecycle: Array<{ method: string; role: string }>;
+    kernelContext: Array<{ method: string; role: string }>;
+    whatPackagesCannotTouch: string[];
+  };
+  userLLMBoundary?: {
+    description: string;
+    flow: Array<{ step: string; owner: string; note: string }>;
+    openTargets: Array<{ name: string; url: string }>;
+  };
   roadmap?: Array<{ stage: string; name: string; status: string; detail: string }>;
 }
 
@@ -237,7 +248,7 @@ export interface CompiledPrompt {
   prompt: string;
 }
 
-// ── Primitive #10: World Service ──────────────────────────────────
+// ── Primitive #10: World Service ─────────────────────────────────
 export interface WorldServiceRecord {
   id: string;
   name: string;
