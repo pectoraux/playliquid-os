@@ -87,11 +87,13 @@ export async function negotiateCapabilities(input: {
       if (rule.action === "deny") {
         currentAction = "deny";
         limitingRule = { layer: labelLayer(policy, input), rule };
-      } else if (rule.action === "limit" && currentAction !== "deny") {
+      } else if (rule.action === "limit") {
+        // a higher-priority limit overrides a lower deny OR allow
         currentAction = "limit";
         limitingRule = { layer: labelLayer(policy, input), rule };
-      } else if (rule.action === "allow" && currentAction === "limit") {
-        // a higher-priority allow can un-limit
+      } else if (rule.action === "allow") {
+        // a higher-priority allow overrides a lower deny OR limit
+        // (the world layer denied, but the zone/experience layer re-grants)
         currentAction = "allow";
         limitingRule = undefined;
       }
