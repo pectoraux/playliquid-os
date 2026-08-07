@@ -36,6 +36,7 @@ import type {
   PackageManifest,
   RenderContext,
 } from "../package-abi";
+import { isCompatible, PROTOCOL_VERSIONS } from "./protocol-versions";
 
 // ── The declarative artifact ──────────────────────────────────────
 export interface DeclarativeArtifact {
@@ -388,7 +389,15 @@ export function validateDeclarativeArtifact(raw: unknown): ArtifactValidationRes
   const a = raw as Record<string, unknown>;
 
   // Required fields
-  if (!a.abiVersion) errors.push("Missing required field: abiVersion");
+  if (!a.abiVersion) {
+    errors.push("Missing required field: abiVersion");
+  } else {
+    // R0: Enforce protocol version compatibility
+    const compat = isCompatible(a.abiVersion as string, PROTOCOL_VERSIONS.packageABI);
+    if (!compat.compatible && compat.reason) {
+      errors.push(`Protocol incompatibility: ${compat.reason}`);
+    }
+  }
   if (!a.name) errors.push("Missing required field: name");
   if (!a.displayName) errors.push("Missing required field: displayName");
   if (!a.family) errors.push("Missing required field: family");

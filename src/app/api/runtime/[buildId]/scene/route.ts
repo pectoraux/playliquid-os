@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { PROTOCOL_VERSIONS, versionString, getSceneProtocolVersion } from "@/lib/playliquid/protocol-versions";
 
 export const dynamic = "force-dynamic";
 
@@ -111,8 +112,21 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ buildId: s
       adapter: manifest.runtimeConfig?.adapter ?? "simulator",
       theme: theme.artDirection ?? "stylized",
       coordinateSystem: "playliquid-world",
-      // The protocol version this scene conforms to
-      protocolVersion: "1.0.0",
+      // R0: Explicit protocol versions — the runtime enforces compatibility
+      protocolVersion: getSceneProtocolVersion(),
+      protocolVersions: {
+        playliquid: versionString(PROTOCOL_VERSIONS.playliquid),
+        packageABI: versionString(PROTOCOL_VERSIONS.packageABI),
+        worldScene: versionString(PROTOCOL_VERSIONS.worldScene),
+        spatialAnchor: versionString(PROTOCOL_VERSIONS.spatialAnchor),
+        capability: versionString(PROTOCOL_VERSIONS.capability),
+        runtimeArtifact: versionString(PROTOCOL_VERSIONS.runtimeArtifact),
+        worldBuild: versionString(PROTOCOL_VERSIONS.worldBuild),
+        stateSync: versionString(PROTOCOL_VERSIONS.stateSync),
+        event: versionString(PROTOCOL_VERSIONS.event),
+        serviceContract: versionString(PROTOCOL_VERSIONS.serviceContract),
+        coordinateSystem: versionString(PROTOCOL_VERSIONS.coordinateSystem),
+      },
     },
     // ── World Nodes (where this world is hosted) ──
     nodes: build.nodes.map((n) => ({
