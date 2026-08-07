@@ -276,7 +276,13 @@ export function useNegotiateCapabilities() {
 // ── Reuse-first ───────────────────────────────────────────────────
 export function useReuseFirst() {
   return useMutation({
-    mutationFn: (body: { naturalLanguage: string; canonical: Record<string, unknown>; worldProjectId?: string }) =>
+    mutationFn: (body: {
+      naturalLanguage: string;
+      canonical: Record<string, unknown>;
+      worldProjectId?: string;
+      policy?: import("@/lib/playliquid/types").ReusePolicy;
+      neverReuseFamilies?: string[];
+    }) =>
       api.post<import("@/lib/playliquid/types").ReuseFirstResult>("/api/reuse", body),
   });
 }

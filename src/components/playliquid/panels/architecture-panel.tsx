@@ -248,10 +248,72 @@ export function ArchitecturePanel() {
         </div>
       )}
 
+      {/* Substrate Guarantees (Stage 1) */}
+      {arch.substrateGuarantees && (
+        <div>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">
+            Stage 1 — Universal Substrate Guarantees
+          </h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            PlayLiquid provides these. Packages <span className="text-foreground">consume</span> them. The LLM <span className="text-foreground">never</span> implements them.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {arch.substrateGuarantees.map((g) => (
+              <div key={g.contract} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  <span className="text-xs font-semibold text-foreground">{g.name}</span>
+                  <Badge variant="outline" className="ml-auto font-mono text-[9px] text-emerald-300/70">{g.contract}</Badge>
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{g.guarantee}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Operational Test */}
+      {arch.operationalTest && (
+        <Card className="border-primary/30 bg-primary/[0.03]">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Scale className="h-4 w-4 text-primary" />
+              The Operational Test
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 rounded-md border border-primary/20 bg-primary/[0.04] p-3 text-sm font-medium text-foreground">
+              "{arch.operationalTest.rule}"
+            </p>
+            <div className="divide-y divide-border">
+              {arch.operationalTest.examples.map((ex) => {
+                const isOS = ex.belongs !== "Package";
+                return (
+                  <div key={ex.capability} className="flex items-center gap-3 py-2">
+                    <span className="w-40 shrink-0 text-xs font-medium text-foreground/80">{ex.capability}</span>
+                    <Badge
+                      variant="outline"
+                      className={
+                        isOS
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-violet-500/30 bg-violet-500/10 text-violet-300"
+                      }
+                    >
+                      {ex.belongs}
+                    </Badge>
+                    <span className="flex-1 text-[11px] text-muted-foreground">{ex.reason}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Roadmap */}
       {arch.roadmap && (
         <div>
-          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Six-Stage Roadmap</h3>
+          <h3 className="mb-3 text-sm font-medium text-muted-foreground">Seven-Stage Roadmap</h3>
           <Card className="border-border bg-card/40">
             <CardContent className="divide-y divide-border p-0">
               {arch.roadmap.map((r) => {

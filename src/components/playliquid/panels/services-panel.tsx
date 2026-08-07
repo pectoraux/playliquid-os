@@ -1,6 +1,6 @@
 "use client";
 
-import { useWorldProjects, useWorldServices } from "@/hooks/use-playliquid";
+import { useWorldProjects, useWorldServices, useArchitecture } from "@/hooks/use-playliquid";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -35,6 +35,7 @@ const categoryIcons: Record<string, React.ComponentType<{ className?: string }>>
 
 export function ServicesPanel() {
   const { data: services, isLoading } = useWorldServices();
+  const { data: arch } = useArchitecture();
 
   return (
     <div className="space-y-4">
@@ -67,6 +68,30 @@ export function ServicesPanel() {
           {services.map((s) => (
             <ServiceCard key={s.id} svc={s} />
           ))}
+        </div>
+      )}
+
+      {/* Substrate Guarantees — the 11 platform promises */}
+      {arch?.substrateGuarantees && (
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">
+            Stage 1 — The 11 Universal Substrate Guarantees
+          </h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            PlayLiquid provides these. Packages <span className="text-foreground">consume</span> them through Contracts. The LLM <span className="text-foreground">never</span> implements them.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {arch.substrateGuarantees.map((g) => (
+              <div key={g.contract} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  <span className="text-xs font-semibold text-foreground">{g.name}</span>
+                </div>
+                <Badge variant="outline" className="mt-1.5 font-mono text-[9px] text-emerald-300/70">{g.contract}</Badge>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{g.guarantee}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

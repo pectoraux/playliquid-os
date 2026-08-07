@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useGenerate, useWorldProjects } from "@/hooks/use-playliquid";
+import { useGenerate, useWorldProjects, useReuseFirst } from "@/hooks/use-playliquid";
+import type { ReusePolicy, ReuseFirstResult } from "@/lib/playliquid/types";
 import { usePlayliquid } from "@/lib/playliquid/store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
   CheckCircle2,
   Terminal,
   Copy,
+  Layers3,
 } from "lucide-react";
 import { toast } from "sonner";
 import { FamilyBadge, HashBadge } from "../primitives";
@@ -62,6 +64,7 @@ const EXAMPLES = [
 
 export function ConsolePanel() {
   const generate = useGenerate();
+  const reuseFirst = useReuseFirst();
   const projects = useWorldProjects();
   const selectPackage = usePlayliquid((s) => s.selectPackage);
   const setPanel = usePlayliquid((s) => s.setPanel);
@@ -69,6 +72,8 @@ export function ConsolePanel() {
   const [nl, setNl] = useState("");
   const [family, setFamily] = useState<Family>("building");
   const [projectId, setProjectId] = useState<string>("none");
+  const [reusePolicy, setReusePolicy] = useState<ReusePolicy>("prefer-existing");
+  const [reuseResult, setReuseResult] = useState<ReuseFirstResult | null>(null);
   const [stage, setStage] = useState<number>(-1);
   const [result, setResult] = useState<{
     specification: Record<string, unknown>;
@@ -85,6 +90,7 @@ export function ConsolePanel() {
       return;
     }
     setResult(null);
+    setReuseResult(null);
     setStage(0);
 
     // animate the staged reveal while the real pipeline runs server-side
@@ -183,6 +189,123 @@ export function ConsolePanel() {
               </button>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Reuse-first resolution — Stage 2 */}
+      <Card className="border-border bg-card/40">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Layers3 className="h-4 w-4 text-primary" />
+            Reuse-First Resolution
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            The Registry is the shared implementation memory. The second user who wants a castle reuses the first user's — the LLM only generates what's missing.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground">Reuse policy — reuse without homogenization</label>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                { v: "reuse-freely", label: "Reuse freely" },
+                { v: "prefer-existing", label: "Prefer existing" },
+                { v: "approve-only", label: "Approve only" },
+                { v: "generate-replacements", label: "Generate replacements" },
+                { v: "never-reuse", label: "Never reuse" },
+              ] as Array<{ v: ReusePolicy; label: string }>).map((p) => (
+                <button
+                  key={p.v}
+                  onClick={() => setReusePolicy(p.v)}
+                  className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    reusePolicy === p.v
+                      ? "border-primary bg-primary/15 text-primary"
+                      : "border-border bg-background/40 text-muted-foreground hover:border-primary/40"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            className="w-full gap-2"
+            disabled={reuseFirst.isPending || !nl.trim()}
+            onClick={() => {
+              reuseFirst.mutate(
+                {
+                  naturalLanguage: nl,
+                  canonical: { family, name: nl.slice(0, 40), capabilities: [] },
+                  worldProjectId: projectId === "none" ? undefined : projectId,
+                  policy: reusePolicy,
+                },
+                {
+                  onSuccess: (res) => {
+                    setReuseResult(res);
+                    toast.success(`Resolved: reuse ${res.reusedCount}, generate ${res.generatedCount}`);
+                  },
+                  onError: (e) => toast.error(e.message),
+                }
+              );
+            }}
+          >
+            {reuseFirst.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Layers3 className="h-4 w-4" />}
+            {reuseFirst.isPending ? "Resolving…" : "Resolve against Registry"}
+          </Button>
+
+          {reuseResult && (
+            <div className="space-y-2 rounded-md border border-border bg-background/40 p-3">
+              <div className="flex items-center gap-3 text-xs">
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <CheckCircle2 className="h-3 w-3" /> {reuseResult.reusedCount} reused
+                </span>
+                <span className="flex items-center gap-1 text-amber-400">
+                  <Sparkles className="h-3 w-3" /> {reuseResult.generatedCount} to generate
+                </span>
+                <span className="ml-auto font-mono text-[10px] text-muted-foreground">policy: {reuseResult.policy}</span>
+              </div>
+              <div className="divide-y divide-border/50">
+                {reuseResult.decomposition.map((d, i) => (
+                  <div key={i} className="py-2">
+                    <div className="flex items-center gap-2">
+                      {d.action === "reuse" ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                      )}
+                      <span className="font-mono text-xs text-foreground/80">{d.family}</span>
+                      <Badge
+                        variant="outline"
+                        className={
+                          d.action === "reuse"
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-[9px] text-emerald-300"
+                            : "border-amber-500/30 bg-amber-500/10 text-[9px] text-amber-300"
+                        }
+                      >
+                        {d.action}
+                      </Badge>
+                      {d.reusedPackage && (
+                        <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">{d.reusedPackage.name}</span>
+                      )}
+                      {d.score && (
+                        <span className="ml-auto font-mono text-[10px] text-muted-foreground">score {d.score.total}</span>
+                      )}
+                    </div>
+                    {d.score && d.action === "reuse" && (
+                      <div className="mt-1 flex flex-wrap gap-1 pl-5">
+                        {d.score.capabilityOverlap > 0 && <span className="font-mono text-[9px] text-muted-foreground/70">caps +{d.score.capabilityOverlap}</span>}
+                        {d.score.styleCompatibility > 0 && <span className="font-mono text-[9px] text-muted-foreground/70">style +{d.score.styleCompatibility}</span>}
+                        {d.score.eraCompatibility > 0 && <span className="font-mono text-[9px] text-muted-foreground/70">era +{d.score.eraCompatibility}</span>}
+                        {d.score.certification > 0 && <span className="font-mono text-[9px] text-muted-foreground/70">cert +{d.score.certification}</span>}
+                      </div>
+                    )}
+                    <p className="mt-0.5 pl-5 text-[10px] text-muted-foreground/70">{d.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

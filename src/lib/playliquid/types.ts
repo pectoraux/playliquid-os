@@ -204,6 +204,11 @@ export interface ArchitectureManifest {
     llmImplements: string[];
   };
   kernelServices?: Array<{ name: string; contract: string; role: string }>;
+  substrateGuarantees?: Array<{ name: string; contract: string; guarantee: string }>;
+  operationalTest?: {
+    rule: string;
+    examples: Array<{ capability: string; belongs: string; reason: string }>;
+  };
   roadmap?: Array<{ stage: string; name: string; status: string; detail: string }>;
 }
 
@@ -320,6 +325,24 @@ export interface ContributionRecord {
 }
 
 // ── Reuse-first generation result ─────────────────────────────────
+export type ReusePolicy =
+  | "reuse-freely"        // reuse anything compatible
+  | "prefer-existing"     // reuse if score >= threshold, else generate
+  | "approve-only"        // reuse only packages on the world's approved list
+  | "generate-replacements" // generate fresh even if compatible exists
+  | "never-reuse";        // never reuse the specified families
+
+export interface ReuseScoreBreakdown {
+  total: number;
+  capabilityOverlap: number;
+  familyMatch: number;
+  certification: number;
+  themeCompatibility: number;
+  styleCompatibility: number;
+  eraCompatibility: number;
+  excluded: boolean;
+}
+
 export interface ReuseFirstResult {
   decomposition: Array<{
     subSpec: Record<string, unknown>;
@@ -327,8 +350,10 @@ export interface ReuseFirstResult {
     action: "reuse" | "generate";
     reusedPackage?: PackageRecord;
     reason: string;
+    score?: ReuseScoreBreakdown;
   }>;
   reusedCount: number;
   generatedCount: number;
   totalSubPackages: number;
+  policy: ReusePolicy;
 }
