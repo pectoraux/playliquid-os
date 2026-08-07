@@ -301,6 +301,50 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
 
       const scale = 4;
 
+      // ── Phase D: Draw spatial cell grid (streaming visualization) ──
+      const CELL_SIZE = 50; // must match server
+      const cellPx = CELL_SIZE * scale;
+      ctx2d.strokeStyle = "rgba(78, 222, 184, 0.08)";
+      ctx2d.lineWidth = 1;
+      for (let cx = (W / 2) % cellPx; cx < W; cx += cellPx) {
+        ctx2d.beginPath(); ctx2d.moveTo(cx, 0); ctx2d.lineTo(cx, H); ctx2d.stroke();
+      }
+      for (let cy = (H / 2) % cellPx; cy < H; cy += cellPx) {
+        ctx2d.beginPath(); ctx2d.moveTo(0, cy); ctx2d.lineTo(W, cy); ctx2d.stroke();
+      }
+
+      // Draw active cells (cells that contain entities) — highlighted
+      for (const entity of s.entities) {
+        const auth = authStateRef.current.get(entity.id);
+        const pos = auth?.position ?? entity.position;
+        const cellCx = Math.floor(pos.x / CELL_SIZE);
+        const cellCz = Math.floor(pos.z / CELL_SIZE);
+        const px = W / 2 + cellCx * cellPx;
+        const py = H / 2 + cellCz * cellPx;
+        ctx2d.fillStyle = "rgba(78, 222, 184, 0.04)";
+        ctx2d.fillRect(px, py, cellPx, cellPx);
+      }
+
+      // Draw interest radius (the player's streaming region)
+      if (sessionId) {
+        const playerSession = sessions.find((s2) => s2.sessionId === sessionId);
+        if (playerSession) {
+          // Center the interest region on the world origin for now
+          // (in a full system, this would follow the player's avatar)
+          const interestRadius = 100 * scale; // 100 world units
+          ctx2d.strokeStyle = "rgba(125, 211, 252, 0.3)";
+          ctx2d.lineWidth = 1.5;
+          ctx2d.setLineDash([4, 4]);
+          ctx2d.beginPath();
+          ctx2d.arc(W / 2, H / 2, interestRadius, 0, Math.PI * 2);
+          ctx2d.stroke();
+          ctx2d.setLineDash([]);
+          ctx2d.fillStyle = "rgba(125, 211, 252, 0.4)";
+          ctx2d.font = "9px monospace";
+          ctx2d.fillText("interest region (streaming)", W / 2 + interestRadius + 4, H / 2);
+        }
+      }
+
       // Update package instances from authoritative state
       for (const [, inst] of packageInstancesRef.current) inst.update(16);
 
@@ -343,7 +387,7 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       ctx2d.fillStyle = "rgba(255,255,255,0.5)"; ctx2d.font = "10px monospace";
       ctx2d.fillText(`PlayLiquid Web Runtime · protocol v${s.runtime.protocolVersion}`, 8, 14);
       ctx2d.fillText(`${s.entities.length} entities · ${packageInstancesRef.current.size} instances · authoritative state`, 8, 28);
-      ctx2d.fillText(`${connected ? "● connected" : "○ disconnected"} · ${sessions.length} players · tick #${tickCount}`, 8, 42);
+      ctx2d.fillText(`${connected ? "● connected" : "○ disconnected"} · ${sessions.length} players · tick #${tickCount} · streaming: spatial cells`, 8, 42);
 
       requestAnimationFrame(loop);
     };

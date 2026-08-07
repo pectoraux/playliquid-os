@@ -195,3 +195,112 @@ export function getSessions(buildId: string): Array<{ sessionId: string; name: s
   if (!map) return [];
   return Array.from(map.entries()).map(([sessionId, val]) => ({ sessionId, ...val }));
 }
+
+// ════════════════════════════════════════════════════════════════
+// PHASE D — SPATIAL CELLS + INTEREST MANAGEMENT + STREAMING
+// ════════════════════════════════════════════════════════════════
+//
+// The world is divided into spatial cells. Each player has a position
+// and an interest radius. The Kernel only sends the player entities
+// in cells within their interest region. As the player moves, cells
+// load/unload dynamically.
+//
+// This is how a world can be larger than the browser's memory: the
+// browser only holds the entities in its interest region.
+
+const CELL_SIZE = 50; // world units per cell
+
+// Player positions per build (for interest management)
+// Key: buildId → Map<sessionId, { x, z, interestRadius }>
+const playerPositions = new Map<string, Map<string, { x: number; z: number; interestRadius: number }>>();
+
+// ── Compute which cell a position belongs to ──────────────────────
+export function getCellKey(x: number, z: number): string {
+  const cx = Math.floor(x / CELL_SIZE);
+  const cz = Math.floor(z / CELL_SIZE);
+  return `${cx},${cz}`;
+}
+
+// ── Get all cell keys within a player's interest radius ───────────
+export function getInterestCells(x: number, z: number, radius: number): Set<string> {
+  const cells = new Set<string>();
+  const minCx = Math.floor((x - radius) / CELL_SIZE);
+  const maxCx = Math.floor((x + radius) / CELL_SIZE);
+  const minCz = Math.floor((z - radius) / CELL_SIZE);
+  const maxCz = Math.floor((z + radius) / CELL_SIZE);
+  for (let cx = minCx; cx <= maxCx; cx++) {
+    for (let cz = minCz; cz <= maxCz; cz++) {
+      cells.add(`${cx},${cz}`);
+    }
+  }
+  return cells;
+}
+
+// ── Update a player's position (for interest management) ──────────
+export function updatePlayerPosition(buildId: string, sessionId: string, x: number, z: number, interestRadius: number = 100): void {
+  if (!playerPositions.has(buildId)) playerPositions.set(buildId, new Map());
+  playerPositions.get(buildId)!.set(sessionId, { x, z, interestRadius });
+}
+
+// ── Remove a player's position ────────────────────────────────────
+export function removePlayerPosition(buildId: string, sessionId: string): void {
+  playerPositions.get(buildId)?.delete(sessionId);
+}
+
+// ── Get entities within a player's interest region ────────────────
+// This is the streaming filter: only entities in the player's interest
+// cells are sent. Entities outside the region are "unloaded."
+export function getEntitiesInInterest(
+  buildId: string,
+  x: number,
+  z: number,
+  radius: number
+): Array<{ entityId: string; position: { x: number; y: number; z: number }; state: Record<string, unknown>; cell: string }> {
+  const stateMap = authoritativeState.get(buildId);
+  if (!stateMap) return [];
+
+  const interestCells = getInterestCells(x, z, radius);
+  const result: Array<{ entityId: string; position: { x: number; y: number; z: number }; state: Record<string, unknown>; cell: string }> = [];
+
+  for (const [entityId, entity] of stateMap.entries()) {
+    const cell = getCellKey(entity.position.x, entity.position.z);
+    if (interestCells.has(cell)) {
+      result.push({
+        entityId,
+        position: entity.position,
+        state: entity.state,
+        cell,
+      });
+    }
+  }
+
+  return result;
+}
+
+// ── Get all active cells for a build (for visualization) ──────────
+export function getActiveCells(buildId: string): Array<{ cell: string; entityCount: number; bounds: { x: number; z: number; w: number; h: number } }> {
+  const stateMap = authoritativeState.get(buildId);
+  if (!stateMap) return [];
+
+  const cellMap = new Map<string, number>();
+  for (const [, entity] of stateMap.entries()) {
+    const cell = getCellKey(entity.position.x, entity.position.z);
+    cellMap.set(cell, (cellMap.get(cell) ?? 0) + 1);
+  }
+
+  return Array.from(cellMap.entries()).map(([cell, count]) => {
+    const [cx, cz] = cell.split(",").map(Number);
+    return {
+      cell,
+      entityCount: count,
+      bounds: {
+        x: cx * CELL_SIZE,
+        z: cz * CELL_SIZE,
+        w: CELL_SIZE,
+        h: CELL_SIZE,
+      },
+    };
+  });
+}
+
+export { CELL_SIZE };

@@ -469,6 +469,193 @@ export function ConsolePanel() {
           )}
         </div>
       )}
+
+      {/* ── Phase E: User-Owned LLM Flow ── */}
+      <UserOwnedLLMFlow />
     </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// PHASE E — USER-OWNED LLM FLOW
+// The canonical path: NL → spec → prompt → user's LLM → import →
+// certification → RuntimeArtifact → browser execution.
+// PlayLiquid never calls an LLM. The user takes the prompt to their
+// LLM, generates the implementation, and pastes it back.
+// ════════════════════════════════════════════════════════════════
+
+function UserOwnedLLMFlow() {
+  const [nl, setNl] = useState("");
+  const [family, setFamily] = useState<Family>("building");
+  const [step, setStep] = useState<"input" | "prompt-ready" | "import">("input");
+  const [specificationId, setSpecificationId] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<string>("");
+  const [openTargets, setOpenTargets] = useState<Array<{ name: string; url: string; description: string }>>([]);
+  const [artifact, setArtifact] = useState("");
+  const [importedPackage, setImportedPackage] = useState<{ packageId: string; packageName: string; hash: string; runtimeArtifactId: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function compilePrompt() {
+    if (!nl.trim()) { toast.error("Describe what you want to build"); return; }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/llm/compile-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ naturalLanguage: nl, worldProjectId: undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSpecificationId(data.specificationId);
+      setPrompt(data.prompt);
+      setOpenTargets(data.openTargets);
+      setStep("prompt-ready");
+      toast.success("Prompt compiled — take it to your LLM");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally { setLoading(false); }
+  }
+
+  async function importPackage() {
+    if (!specificationId || !artifact.trim()) { toast.error("Paste the LLM's output"); return; }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/llm/import-package", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ specificationId, artifact, family }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setImportedPackage(data);
+      setStep("import");
+      toast.success(`Package "${data.packageName}" imported + certified as RuntimeArtifact`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <Card className="border-amber-500/20 bg-amber-500/[0.03]">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <ShieldCheck className="h-4 w-4 text-amber-400" />
+          User-Owned LLM Flow — Phase E
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          PlayLiquid produces a Specification + Prompt. You take it to YOUR LLM (ChatGPT, Claude, Gemini, Z.ai).
+          You paste the result back. PlayLiquid certifies it as a RuntimeArtifact and can execute it.
+          <span className="text-foreground"> PlayLiquid never calls an LLM.</span>
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {step === "input" && (
+          <>
+            <Textarea
+              value={nl}
+              onChange={(e) => setNl(e.target.value)}
+              placeholder="e.g. A medieval bakery with a stone oven, wooden counter, and bread displays"
+              rows={2}
+              className="resize-none bg-background/60"
+            />
+            <div className="flex gap-2">
+              <Select value={family} onValueChange={(v) => setFamily(v as Family)}>
+                <SelectTrigger className="w-[120px] bg-background/60 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(["building", "avatar", "vehicle", "road", "weather", "physics", "creature", "sensory", "infrastructure"] as Family[]).map((f) => (
+                    <SelectItem key={f} value={f}>{f}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={compilePrompt} disabled={loading} className="flex-1 gap-2">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileJson className="h-4 w-4" />}
+                Compile Prompt
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Step 1: PlayLiquid converts your NL → canonical Specification → compiled implementation Prompt.
+            </p>
+          </>
+        )}
+
+        {step === "prompt-ready" && (
+          <>
+            <div className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] p-2.5">
+              <p className="mb-1 text-[10px] font-semibold uppercase text-amber-400">Step 2: Take this prompt to your LLM</p>
+              <div className="flex flex-wrap gap-1.5">
+                {openTargets.map((t) => (
+                  <a key={t.name} href={t.url} target="_blank" rel="noopener noreferrer"
+                    className="rounded-md border border-border bg-background/40 px-2 py-1 font-mono text-[10px] text-foreground/70 transition-colors hover:border-amber-500/40 hover:text-amber-300">
+                    {t.name} ↗
+                  </a>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-[10px] uppercase text-muted-foreground">Compiled Prompt</span>
+                <Button variant="ghost" size="sm" className="h-6 gap-1 text-[10px]"
+                  onClick={() => { navigator.clipboard.writeText(prompt); toast.success("Prompt copied"); }}>
+                  <Copy className="h-3 w-3" /> Copy
+                </Button>
+              </div>
+              <ScrollArea className="h-40 rounded-md border border-border bg-background/60 p-2 scroll-thin">
+                <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-foreground/70">{prompt}</pre>
+              </ScrollArea>
+            </div>
+            <div>
+              <p className="mb-1 text-[10px] font-semibold uppercase text-amber-400">Step 3: Paste the LLM's output here</p>
+              <Textarea
+                value={artifact}
+                onChange={(e) => setArtifact(e.target.value)}
+                placeholder="Paste the package implementation from your LLM..."
+                rows={3}
+                className="resize-none bg-background/60 font-mono text-xs"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep("input")} className="text-xs">Back</Button>
+              <Button onClick={importPackage} disabled={loading || !artifact.trim()} className="flex-1 gap-2">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                Import + Certify as RuntimeArtifact
+              </Button>
+            </div>
+          </>
+        )}
+
+        {step === "import" && importedPackage && (
+          <div className="space-y-3">
+            <div className="flex flex-col items-center py-4 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-400">
+                <CheckCircle2 className="h-6 w-6" />
+              </div>
+              <h3 className="mt-3 text-base font-semibold">Package Certified + Executable</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                <span className="font-mono text-foreground/80">{importedPackage.packageName}</span>
+              </p>
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                <HashBadge hash={importedPackage.hash} />
+                <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-[9px] text-emerald-300">
+                  RuntimeArtifact: playliquid-web
+                </Badge>
+                <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-[9px] text-amber-300">
+                  provenance: user-owned
+                </Badge>
+              </div>
+              <p className="mt-3 max-w-md text-[11px] text-muted-foreground">
+                This package is now in the Registry with a certified RuntimeArtifact.
+                It can be composed into a World Build and executed in the browser runtime.
+                PlayLiquid did not call any LLM — the implementation came from your LLM.
+              </p>
+            </div>
+            <Button variant="outline" className="w-full" onClick={() => {
+              setStep("input"); setNl(""); setArtifact(""); setImportedPackage(null); setPrompt("");
+            }}>
+              Generate another package
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
