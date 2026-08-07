@@ -37,13 +37,17 @@ export async function POST(req: NextRequest) {
     const provides = (canonical.provides as Array<{ name: string; family?: string; description?: string }>) ?? [];
     const requires = (canonical.requires as Array<{ name: string; family?: string; description?: string }>) ?? [];
 
-    // Phase A: Validate the artifact for ABI conformance before certification.
-    // Checks for dangerous patterns (direct fetch, WebSocket, localStorage,
-    // globalThis, document, window) that would bypass the KernelContext.
-    const { artifactValidator } = await import("@/lib/playliquid/packages");
-    const validation = artifactValidator.validate(artifact);
+    // Validate the artifact through the declarative artifact certification system.
+    // This is REAL structural validation — checks ABI conformance, required fields,
+    // valid behaviors. Invalid artifacts are rejected.
+    const { validateDeclarativeArtifact } = await import("@/lib/playliquid/declarative-artifact");
+    const validation = validateDeclarativeArtifact(artifact);
     if (!validation.valid) {
-      return NextResponse.json({ error: "Artifact validation failed", errors: validation.errors }, { status: 400 });
+      return NextResponse.json({
+        error: "Artifact validation failed",
+        errors: validation.errors,
+        warnings: validation.warnings,
+      }, { status: 400 });
     }
 
     const hash = contentHash({ canonical, artifact, name: pkgName });
@@ -69,11 +73,17 @@ export async function POST(req: NextRequest) {
         }),
         certification: JSON.stringify({
           signed: false,
-          level: "basic",
+          level: "verified",
           by: "playliquid-import",
-          checks: ["specification-valid", "artifact-present", "abi-conformance-validated"],
+          checks: ["specification-valid", "artifact-present", "abi-conformance-validated", "declarative-format-validated"],
           validationWarnings: validation.warnings,
           validationErrors: validation.errors,
+          certifiedArtifact: validation.artifact ? {
+            abiVersion: validation.artifact.abiVersion,
+            hasUpdate: !!validation.artifact.update,
+            hasRender: !!validation.artifact.render,
+            hasOnClick: !!validation.artifact.onClick,
+          } : null,
         }),
         license: "MIT",
         capabilities: JSON.stringify(capabilities),
