@@ -204,3 +204,26 @@ Stage Summary:
 - Multi-layer capability negotiation is the most demonstrable new feature: Superman is grounded in Amsterdam, can fly in the museum-district, and regains all powers during the superman-event — all from the same package, with zero package modifications.
 - Reuse-first pipeline ensures the second user who wants a castle reuses the first user's castle package instead of regenerating it.
 - Vercel: playliquid-os.vercel.app is live with the 10-primitive architecture. The capability negotiation fix will deploy when the rate limit resets.
+
+---
+Task ID: 4
+Agent: orchestrator (main)
+Task: Freeze the operational test + substrate guarantees + reuse policies per the user's conceptual tightening.
+
+Work Log:
+- Added the frozen architectural sentence as Law #1: "PlayLiquid is responsible for making packages operational; creators are responsible only for specifying the behavior and implementation of their packages."
+- Added the operational test as Law #2: "If a capability is fundamental to operating a virtual world, it belongs in the PlayLiquid OS substrate rather than in an individual package." With 13 worked examples (Multiplayer=OS, Streaming=OS, Replication=OS, Identity=OS, Ads=OS Service, Payments=OS Service, Capability enforcement=Kernel, Spatial composition=OS Contract, Hosting=World Node, World-specific behavior=Package, World-specific content=Package, New sensory technology=Runtime Adapter/World Service, LLM=Implementation backend chosen by the user).
+- Added 11 substrate guarantees (Stage 1): Multiplayer, Replication, Identity, Persistence, Streaming, Spatial Services, Capability Enforcement, Economy, Advertising, Voice, Discovery — each with a contract name and a guarantee text. Packages consume them; the LLM never implements them.
+- Strengthened the reuse engine with 5 reuse policies: reuse-freely, prefer-existing, approve-only, generate-replacements, never-reuse. The score breakdown now separates capabilityOverlap, familyMatch, certification, themeCompatibility, styleCompatibility, eraCompatibility — so the UI shows WHY a package was chosen or rejected.
+- Updated the roadmap to 7 stages (0=Frozen OS Primitives [done], 1=Universal Substrate [in-progress], 2=Package Resolution [in-progress], 3=World Projects at Scale [in-progress], 4=Distributed World Runtime [partial], 5=Multimodal World Compiler [planned], 6=Marketplace + World Economy [planned], 7=Sensory Runtime [planned]).
+- Console panel: added a reuse-policy selector (5 buttons) + "Resolve against Registry" button that shows the per-sub-package decomposition with reuse/generate decisions and score breakdowns.
+- Architecture panel: added the Substrate Guarantees grid (11 promises) + the Operational Test section (13 examples with OS/Package badges).
+- Services panel: added the 11 substrate guarantees as platform promises.
+- Verified locally: architecture API returns 10 primitives, 6 laws, 11 guarantees, 13 test examples, 8 roadmap stages. Reuse API works with policies (prefer-existing reuses canal-house score 5; generate-replacements forces generation).
+- Pushed to GitHub. Vercel deployment pending rate-limit reset.
+
+Stage Summary:
+- The architecture now has a clear decision rule: "If a capability is fundamental to operating a virtual world, it belongs in the OS substrate." Every future feature can be tested against this.
+- 11 substrate guarantees make the platform promises explicit and consumable.
+- 5 reuse policies give creators control over reuse-vs-diversity: reuse without homogenization.
+- The Console now shows the full reuse-first flow: decompose → search registry → score → reuse/generate, with the score breakdown visible.
