@@ -9,9 +9,11 @@ export const dynamic = "force-dynamic";
 //
 // This is the USER-OWNED LLM flow. The user generated the package
 // implementation in THEIR LLM, and pastes the result here. PlayLiquid
-// certifies + registers it.
+// validates, certifies + registers it.
 //
-// PlayLiquid doesn't know — and doesn't need to know — which LLM produced this.
+// Phase A: the artifact goes through ABI conformance validation before
+// certification. Dangerous patterns (direct fetch, WebSocket, localStorage,
+// globalThis, document, window) are flagged as warnings.
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { specificationId, artifact, family, name, displayName } = body;
@@ -34,6 +36,16 @@ export async function POST(req: NextRequest) {
     const capabilities = (canonical.capabilities as string[]) ?? [];
     const provides = (canonical.provides as Array<{ name: string; family?: string; description?: string }>) ?? [];
     const requires = (canonical.requires as Array<{ name: string; family?: string; description?: string }>) ?? [];
+
+    // Phase A: Validate the artifact for ABI conformance before certification.
+    // Checks for dangerous patterns (direct fetch, WebSocket, localStorage,
+    // globalThis, document, window) that would bypass the KernelContext.
+    const { artifactValidator } = await import("@/lib/playliquid/packages");
+    const validation = artifactValidator.validate(artifact);
+    if (!validation.valid) {
+      return NextResponse.json({ error: "Artifact validation failed", errors: validation.errors }, { status: 400 });
+    }
+
     const hash = contentHash({ canonical, artifact, name: pkgName });
 
     const pkg = await db.package.create({
@@ -59,7 +71,9 @@ export async function POST(req: NextRequest) {
           signed: false,
           level: "basic",
           by: "playliquid-import",
-          checks: ["specification-valid", "artifact-present"],
+          checks: ["specification-valid", "artifact-present", "abi-conformance-validated"],
+          validationWarnings: validation.warnings,
+          validationErrors: validation.errors,
         }),
         license: "MIT",
         capabilities: JSON.stringify(capabilities),

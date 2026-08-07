@@ -5,126 +5,118 @@
 // This is the single most important contract in the OS. It defines the
 // boundary between a Package implementation and the PlayLiquid Kernel.
 //
-// A package implementation NEVER directly touches:
-//   - multiplayer / networking / replication
-//   - other players
-//   - persistence
-//   - world authority
-//   - capability permissions
-//   - spatial identity
-//   - ads / economy / identity
-//
-// Instead it interacts with the OS exclusively through the KernelContext,
-// which the Kernel provides. The OS owns the world; the package owns the
-// behavior.
-//
-//   Package Implementation
-//       │
-//       ▼
-//   Package Runtime ABI (this interface)
-//       │
-//       ▼
-//   KernelContext (what the Kernel exposes to the package)
-//       │
-//       ▼
-//   Kernel / World Services / World State
-//       │
-//       ▼
-//   Browser / Mobile / Unity / Unreal (Runtime Adapter)
+// Phase A improvements:
+//   - PackageImplementation is now a FACTORY: createInstance() returns a
+//     new PackageInstance per entity. No singletons. 10,000 walkers each
+//     get independent state.
+//   - RenderContext is now ENGINE-AGNOSTIC: no canvas-specific types.
+//     It exposes draw commands (drawRect, drawCircle, drawText, etc.)
+//     that each adapter (canvas, WebGL, Unity, Unreal) translates.
+//   - The Kernel owns authoritative state. Packages define+mutate
+//     through KernelContext, but the Kernel is the state authority.
 
 // ── The KernelContext: what the Kernel exposes to a package ────────
-// This is the ONLY surface a package implementation can use to interact
-// with the world. It deliberately does NOT expose networking, other
-// players, persistence internals, or capability internals.
 export interface KernelContext {
-  // The entity this package instance is mounted on
   entityId: string;
   entityName: string;
 
-  // Spatial — the package can READ its position but cannot set it
-  // directly. It requests movement via `requestMovement`, which the
-  // Kernel may deny based on capability policy.
+  // Spatial — the package can READ its position. Movement is a REQUEST;
+  // the Kernel owns authoritative position and may deny.
   getPosition(): { x: number; y: number; z: number };
   requestMovement(delta: { x: number; y: number; z: number }): void;
 
-  // State — the package owns its entity's state. The Kernel
-  // persists + replicates it; the package reads + writes it.
+  // State — the package defines+mutates logical state. The Kernel owns
+  // authoritative state (persists, replicates, resolves conflicts).
   getState(): Record<string, unknown>;
   setState(patch: Record<string, unknown>): void;
 
-  // Events — the package can emit + receive events. The Kernel
-  // routes them; the package never touches the transport.
+  // Events — Kernel routes; package never touches transport.
   emit(event: string, payload: Record<string, unknown>): void;
   on(event: string, handler: (payload: Record<string, unknown>) => void): void;
 
-  // Capabilities — the package requests capabilities. The Kernel
-  // negotiates (entity × world × zone × experience) and returns
-  // ALLOW / DENY / LIMIT. There is NO direct path to execution.
+  // Capabilities — Kernel gate. No direct path to execution.
   invokeCapability(
     capability: string,
     args?: Record<string, unknown>
   ): Promise<{ granted: boolean; action: "allow" | "deny" | "limit"; params?: Record<string, unknown> }>;
 
-  // Services — the package can request OS services (multiplayer,
-  // persistence, ads, economy, etc.) through a controlled interface.
-  // It never implements them.
+  // Services — OS services (multiplayer, persistence, ads, economy).
   requestService(
     service: string,
     action: string,
     params?: Record<string, unknown>
   ): Promise<unknown>;
 
-  // Logging — for observability. The Kernel routes logs.
+  // Logging
   log(level: "info" | "warn" | "error", message: string): void;
 }
 
-// ── The Package Runtime ABI: the frozen lifecycle ─────────────────
-// Every executable package implementation must conform to this interface.
-// The Kernel calls these methods; the package responds.
-export interface PackageRuntimeABI {
-  // Called once when the package is loaded. The package receives the
-  // KernelContext and its own specification + manifest.
+// ── The engine-agnostic RenderContext ─────────────────────────────
+// Phase A fix: NO canvas-specific types. The package issues draw
+// commands; the adapter (canvas, WebGL, Unity, Unreal) translates them.
+// The package never knows what a Canvas is.
+export interface RenderContext {
+  // The entity's position in the render surface (pre-computed by adapter)
+  screenX: number;
+  screenY: number;
+  worldX: number;
+  worldY: number;
+  worldZ: number;
+  scale: number;
+  selected: boolean;
+
+  // ── Draw commands (engine-agnostic) ──
+  drawRect(x: number, y: number, w: number, h: number, opts: DrawOpts): void;
+  drawCircle(x: number, y: number, r: number, opts: DrawOpts): void;
+  drawLine(x1: number, y1: number, x2: number, y2: number, opts: DrawOpts): void;
+  drawText(x: number, y: number, text: string, opts: TextOpts): void;
+  drawPath(points: Array<{ x: number; y: number }>, opts: DrawOpts): void;
+  pushTransform(x: number, y: number, rotation: number, scale: number): void;
+  popTransform(): void;
+}
+
+export interface DrawOpts {
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  opacity?: number;
+}
+
+export interface TextOpts {
+  color?: string;
+  font?: string;
+  size?: number;
+  align?: "left" | "center" | "right";
+}
+
+// ── PackageInstance: one per entity ───────────────────────────────
+// Phase A fix: each entity gets its own instance with isolated state.
+// No global _ctx singletons.
+export interface PackageInstance {
   initialize(ctx: KernelContext, manifest: PackageManifest): void;
-
-  // Called when the package is mounted on an entity.
   mount(): void;
-
-  // Called every simulation tick. delta = milliseconds since last tick.
   update(delta: number): void;
-
-  // Called when a world event reaches this entity.
   handle(event: string, payload: Record<string, unknown>): void;
-
-  // Called when the package needs to render. The render context is
-  // provided by the Runtime Adapter (canvas, WebGL, Unity, etc.).
-  // The package draws into it; it never owns the render surface.
   render(rc: RenderContext): void;
-
-  // Called when the package is unmounted from an entity.
   dispose(): void;
 }
 
-// ── What a Package Implementation IS ──────────────────────────────
-// A canonical Package has a Specification (engine-independent). A
-// Package Implementation is the executable artifact that conforms to
-// the PackageRuntimeABI. One package can have multiple implementations
-// (playliquid-web, unity, unreal) — all conforming to the same ABI.
+// ── PackageImplementation: a factory that creates instances ───────
+// Phase A fix: the implementation is a FACTORY, not a singleton.
+// Each entity calls createInstance() to get its own PackageInstance.
 export interface PackageImplementation {
+  // The runtime target this implementation supports
   target: string; // "playliquid-web" | "playliquid-mobile" | "unity" | "unreal"
-  runtime: string; // "playliquid" | "unity" | "unreal"
-  version: string; // ABI version this implementation targets
-  entrypoint: string; // how to load this implementation
-  format: string; // "js-module" | "unity-prefab" | "unreal-asset"
-  // What this implementation provides (capabilities + contracts)
-  capabilities: string[];
-  contracts: string[];
-  // Assets the implementation needs
-  assets: string[];
-  // Other package implementations this one depends on
-  dependencies: string[];
+
+  // Create a new isolated instance for one entity
+  createInstance(): PackageInstance;
+
+  // Metadata for validation
+  readonly abiVersion: string;
+  readonly capabilities: string[];
 }
 
-// ── The Package Manifest (engine-independent) ─────────────────────
+// ── Package Manifest (engine-independent) ─────────────────────────
 export interface PackageManifest {
   name: string;
   displayName: string;
@@ -134,40 +126,28 @@ export interface PackageManifest {
   capabilities: string[];
   provides: string[];
   requires: string[];
-  implementations: PackageImplementation[];
 }
 
-// ── The Render Context (provided by the Runtime Adapter) ──────────
-// The package draws into this; it never owns the canvas/scene. This
-// makes the renderer replaceable — the same package can render to
-// canvas, WebGL, or a Unity scene.
-export interface RenderContext {
-  // The type of render context (canvas-2d, webgl, unity, unreal)
-  type: string;
-  // For canvas-2d: the 2D context
-  ctx2d?: CanvasRenderingContext2D;
-  // The entity's screen position (pre-computed by the adapter)
-  screenX: number;
-  screenY: number;
-  // The world position (for 3D adapters)
-  worldX: number;
-  worldY: number;
-  worldZ: number;
-  // Scale factor (world units → screen pixels)
-  scale: number;
-  // Whether this entity is selected (for highlight)
-  selected: boolean;
+// ── RuntimeArtifact loader interface ──────────────────────────────
+// Phase A fix: the loader resolves implementations from RuntimeArtifacts,
+// not a hard-coded Map. Each adapter implements this.
+export interface RuntimeArtifactLoader {
+  // Load a PackageImplementation from a RuntimeArtifact for a given target
+  load(artifactUri: string, target: string): Promise<PackageImplementation | null>;
+  // Check if an artifact is available for a target
+  isAvailable(artifactUri: string, target: string): boolean;
 }
 
-// ── Package Executor: loads + runs package implementations ────────
-// The executor is the bridge between the Kernel and the package. It:
-//   1. loads the package implementation (JS module, Unity prefab, etc.)
-//   2. creates the KernelContext for the entity
-//   3. calls initialize() / mount() / update() / render() / dispose()
-//   4. enforces the ABI boundary (packages can't escape it)
-export interface PackageExecutor {
-  // Load a package implementation for a given target
-  load(impl: PackageImplementation): Promise<PackageRuntimeABI>;
-  // Check if an implementation is available for a target
-  isAvailable(target: string): boolean;
+// ── Artifact validation (ABI conformance checker) ─────────────────
+export interface ArtifactValidator {
+  // Validate that an artifact conforms to the Package Runtime ABI
+  validate(artifact: unknown): ValidationResult;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  // The parsed implementation if valid
+  implementation?: PackageImplementation;
 }
