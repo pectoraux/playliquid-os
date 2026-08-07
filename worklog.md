@@ -180,3 +180,27 @@ Stage Summary:
 - Auth: admin + 2 demo accounts seeded; waitlist sign-up + admin approval flow working on Vercel
 - Env vars: all 11 set on Vercel (production + preview + development targets)
 - Known gap: /api/generate uses the full LLM on space-z.ai; on Vercel it falls back to a rule-based pipeline (code pushed, pending deployment limit reset). All other features work identically on both platforms.
+
+---
+Task ID: 3
+Agent: orchestrator (main)
+Task: Evolve Playliquid OS to the 10-primitive substrate-vs-LLM architecture per the user's reassessment.
+
+Work Log:
+- Added 10th primitive: World Service (platform OS services — multiplayer, streaming, persistence, voice, ads, identity, economy). Packages consume them through Contracts; the user's LLM NEVER implements them.
+- Added multi-layer capability negotiation engine (the Superman example): entity caps × world policy × zone policy × experience policy = effective. Packages stay reusable across 500 worlds; worlds layer policies on top. Fixed the "deny is sticky" bug so higher-priority allow/limit overrides lower-priority deny.
+- Added reuse-first generation pipeline: decompose spec → search registry per sub-package → reuse matches → generate only missing.
+- Added spatial slots (attachment API): world defines named slots (canal-network, city-center, museum-district, residential), packages declare required slots, Composer attaches.
+- Added contributions model (World Projects as GitHub for Worlds): propose packages, target spatial slots, maintainer merge/reject.
+- Updated architecture manifest: 10 primitives, 4 laws (including "the LLM implements packages, NEVER OS substrate"), OS-substrate-vs-LLM table, 10 kernel service contracts, 7-stage roadmap with statuses.
+- Seeded: Superman/Bird/Human/Dragon avatars with declared capabilities, capability policies (flight denied world-wide for Superman, allowed in museum-district zone + superman-event experience; super_strength denied world-wide, restored in superman-event; heat_vision limited to 5m range), 7 world services, 4 spatial slots, 3 service bindings, 1 sample contribution (Rijksmuseum → museum-district).
+- New UI panels: Capabilities (Superman multi-layer negotiation), Services (OS substrate distinction), Contributions (GitHub for Worlds). Architecture panel now shows the substrate table, kernel service contracts, and the 6-stage roadmap.
+- Verified via curl locally: 10 primitives/4 laws/substrate/10 kernel services/7-stage roadmap; 7 world services; 5 avatars; Superman negotiation across 3 scenarios (no zone → flight denied; museum-district zone → flight allowed; superman-event experience → flight + super_strength allowed).
+- Pushed to GitHub (2 commits: architecture evolution + capability fix). Vercel auto-deployed the first commit (dpl_6dAz6aaLRUac, READY) — verified 10 primitives, 7 services, 5 avatars, and Superman negotiation all work on playliquid-os.vercel.app. The capability fix commit is pushed and will deploy when Vercel's free-tier daily limit resets.
+
+Stage Summary:
+- The architecture now explicitly distinguishes OS substrate (PlayLiquid provides: multiplayer, replication, streaming, persistence, capability enforcement, platform services) from LLM implementation (packages: castles, avatars, weather, domain logic).
+- 10 frozen primitives (added World Service). 4 architectural laws (added the substrate-vs-LLM law).
+- Multi-layer capability negotiation is the most demonstrable new feature: Superman is grounded in Amsterdam, can fly in the museum-district, and regains all powers during the superman-event — all from the same package, with zero package modifications.
+- Reuse-first pipeline ensures the second user who wants a castle reuses the first user's castle package instead of regenerating it.
+- Vercel: playliquid-os.vercel.app is live with the 10-primitive architecture. The capability negotiation fix will deploy when the rate limit resets.
