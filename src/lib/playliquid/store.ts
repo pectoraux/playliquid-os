@@ -8,7 +8,8 @@ export type PanelId =
   | "worlds"
   | "build"
   | "runtime"
-  | "console";
+  | "console"
+  | "admin";
 
 interface PlayliquidState {
   panel: PanelId;

@@ -3,34 +3,66 @@
 import { usePlayliquid } from "@/lib/playliquid/store";
 import type { PanelId } from "@/lib/playliquid/store";
 import { useKernelEvents, usePackages, useWorldNodes } from "@/hooks/use-playliquid";
+import { useSessionUser, useSignOut } from "@/hooks/use-auth";
+import { AuthGate } from "@/components/auth/auth-gate";
 import { ArchitecturePanel } from "@/components/playliquid/panels/architecture-panel";
 import { RegistryPanel } from "@/components/playliquid/panels/registry-panel";
 import { WorldsPanel } from "@/components/playliquid/panels/worlds-panel";
 import { BuildPanel } from "@/components/playliquid/panels/build-panel";
 import { RuntimePanel } from "@/components/playliquid/panels/runtime-panel";
 import { ConsolePanel } from "@/components/playliquid/panels/console-panel";
-import { Droplets, Boxes, Globe, Layers3, Server, Terminal, Sparkles, Activity } from "lucide-react";
+import { AdminPanel } from "@/components/playliquid/panels/admin-panel";
+import {
+  Droplets,
+  Boxes,
+  Globe,
+  Layers3,
+  Server,
+  Terminal,
+  Sparkles,
+  Activity,
+  Shield,
+  LogOut,
+  ChevronDown,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useState, useRef, useEffect } from "react";
+import { Badge } from "@/components/ui/badge";
 
-const NAV: Array<{ id: PanelId; label: string; icon: React.ComponentType<{ className?: string }>; desc: string }> = [
+const NAV: Array<{ id: PanelId; label: string; icon: React.ComponentType<{ className?: string }>; desc: string; adminOnly?: boolean }> = [
   { id: "architecture", label: "Architecture", icon: Boxes, desc: "The frozen 9 primitives" },
   { id: "registry", label: "Registry", icon: Layers3, desc: "Packages — everything is one" },
   { id: "worlds", label: "Worlds", icon: Globe, desc: "World Projects" },
   { id: "build", label: "Build", icon: Sparkles, desc: "Compose a World Build" },
   { id: "runtime", label: "Runtime", icon: Server, desc: "Nodes · Entities · Kernel" },
   { id: "console", label: "Console", icon: Terminal, desc: "Natural language → Package" },
+  { id: "admin", label: "Admin", icon: Shield, desc: "Waitlist approvals", adminOnly: true },
 ];
 
 export default function Home() {
+  return (
+    <AuthGate>
+      <Console />
+    </AuthGate>
+  );
+}
+
+function Console() {
   const panel = usePlayliquid((s) => s.panel);
   const setPanel = usePlayliquid((s) => s.setPanel);
   const events = useKernelEvents(20);
   const packages = usePackages();
   const nodes = useWorldNodes();
+  const { data: sessionData } = useSessionUser();
+  const user = sessionData?.user;
+  const isAdmin = user?.role === "ADMIN";
+  const isDemo = !!user?.email?.endsWith("@playliquid.os");
 
   const runningNodes = nodes.data?.filter((n) => n.status === "running").length ?? 0;
   const latestEvent = events.data?.[0];
   const activeNav = NAV.find((n) => n.id === panel);
+
+  const visibleNav = NAV.filter((n) => !n.adminOnly || isAdmin);
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
@@ -59,6 +91,8 @@ export default function Home() {
               mono
             />
           </div>
+
+          <UserMenu />
         </div>
       </header>
 
@@ -67,7 +101,7 @@ export default function Home() {
         {/* Sidebar */}
         <aside className="sticky top-14 z-20 border-b border-border bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70 lg:static lg:top-auto lg:z-auto lg:w-64 lg:shrink-0 lg:border-b-0 lg:border-r lg:bg-sidebar/30 lg:backdrop-blur-none">
           <nav className="flex gap-1 overflow-x-auto p-3 lg:flex-col lg:overflow-visible">
-            {NAV.map((item) => {
+            {visibleNav.map((item) => {
               const Icon = item.icon;
               const active = panel === item.id;
               return (
@@ -83,7 +117,12 @@ export default function Home() {
                 >
                   <Icon className={cn("h-4 w-4 shrink-0", active ? "text-primary" : "text-muted-foreground group-hover:text-foreground")} />
                   <div className="hidden lg:block">
-                    <div className="text-sm font-medium leading-tight">{item.label}</div>
+                    <div className="flex items-center gap-1.5 text-sm font-medium leading-tight">
+                      {item.label}
+                      {item.adminOnly && (
+                        <Shield className="h-2.5 w-2.5 text-amber-400" />
+                      )}
+                    </div>
                     <div className="text-[10px] text-muted-foreground">{item.desc}</div>
                   </div>
                   <span className="lg:hidden text-sm font-medium">{item.label}</span>
@@ -107,6 +146,7 @@ export default function Home() {
           {panel === "build" && <BuildPanel />}
           {panel === "runtime" && <RuntimePanel />}
           {panel === "console" && <ConsolePanel />}
+          {panel === "admin" && isAdmin && <AdminPanel />}
         </main>
       </div>
 
@@ -130,6 +170,73 @@ export default function Home() {
           </div>
         </div>
       </footer>
+    </div>
+  );
+}
+
+function UserMenu() {
+  const { data } = useSessionUser();
+  const signOut = useSignOut();
+  const user = data?.user;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  if (!user) return null;
+
+  const initials = (user.name ?? user.email ?? "?").slice(0, 1).toUpperCase();
+  const isDemo = !!user.email?.endsWith("@playliquid.os");
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-2 py-1.5 transition-colors hover:bg-muted/50"
+      >
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/15 font-mono text-xs font-semibold text-primary">
+          {initials}
+        </div>
+        <div className="hidden text-left sm:block">
+          <div className="flex items-center gap-1.5 text-xs font-medium leading-none">
+            {user.name ?? user.email}
+            {isDemo && (
+              <Badge variant="outline" className="h-3.5 px-1 text-[8px] uppercase text-amber-300 border-amber-500/30 bg-amber-500/10">
+                demo
+              </Badge>
+            )}
+          </div>
+          <div className="font-mono text-[9px] text-muted-foreground">{user.role}</div>
+        </div>
+        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-popover p-1.5 shadow-lg">
+          <div className="border-b border-border px-2 py-1.5">
+            <p className="truncate text-xs font-medium">{user.name ?? "User"}</p>
+            <p className="truncate font-mono text-[10px] text-muted-foreground">{user.email}</p>
+            <div className="mt-1 flex gap-1">
+              <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase">{user.role}</Badge>
+              {isDemo && (
+                <Badge variant="outline" className="h-4 px-1 text-[9px] uppercase text-amber-300 border-amber-500/30 bg-amber-500/10">demo</Badge>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => signOut.mutate()}
+            className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-foreground/80 transition-colors hover:bg-muted/50"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </button>
+        </div>
+      )}
     </div>
   );
 }

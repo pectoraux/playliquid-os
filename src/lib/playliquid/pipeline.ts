@@ -12,7 +12,7 @@
 // The provider is recorded in provenance so the same specification can later
 // be re-implemented by a different model without changing Playliquid.
 
-import ZAI from "z-ai-web-dev-sdk";
+import { getZAI } from "./llm-client";
 import { db } from "@/lib/db";
 import { contentHash } from "./hashing";
 import { contextForWorld } from "./resolver";
@@ -43,7 +43,7 @@ export async function nlToSpecification(
   naturalLanguage: string,
   worldProjectId?: string
 ): Promise<{ canonical: Record<string, unknown>; specificationId: string }> {
-  const zai = await ZAI.create();
+  const zai = await getZAI();
   const completion = await zai.chat.completions.create({
     messages: [
       { role: "assistant", content: SYSTEM_PROMPT },
@@ -170,7 +170,7 @@ export async function runGenerationPipeline(input: {
 
   // 3. Generate the artifact via the user's LLM
   log.push({ step: "generating", at: stamp(), detail: "calling user's LLM" });
-  const zai = await ZAI.create();
+  const zai = await getZAI();
   const completion = await zai.chat.completions.create({
     messages: [
       {

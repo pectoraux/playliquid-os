@@ -7,8 +7,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -200,4 +201,69 @@ model GenerationRequest {
   package       Package? @relation(fields: [packageId], references: [id])
   log           String   // JSON pipeline trace
   createdAt     DateTime @default(now())
+}
+
+// ════════════════════════════════════════════════════════════════
+// AUTHENTICATION — Users, Waitlist, NextAuth tables
+// ════════════════════════════════════════════════════════════════
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String?
+  passwordHash String?
+  role         String    @default("USER") // ADMIN | USER | DEMO
+  status       String    @default("ACTIVE") // ACTIVE | WAITLIST | DISABLED
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+}
+
+model Waitlist {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  note      String?
+  createdAt DateTime @default(now())
+  reviewedAt DateTime?
+  reviewedBy String?
+  userId    String?  // the User created when approved
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
 }
