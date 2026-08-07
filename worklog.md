@@ -319,3 +319,47 @@ Stage Summary:
 - The renderer is replaceable — the same package can render to canvas, WebGL, Unity, or Unreal by conforming to the same ABI with a different RenderContext.
 - The LLM boundary is user-owned — PlayLiquid produces the prompt, the user takes it to their LLM, imports the result. PlayLiquid doesn't need API keys.
 - 12 frozen laws. The architecture is now honest about what's a contract vs what's an implementation.
+
+---
+Task ID: 8
+Agent: orchestrator (main)
+Task: The three critical runtime boundary fixes (enforce contracts, not just describe them).
+
+Work Log:
+Fix #1 — Real RuntimeArtifact loader:
+- Created src/lib/playliquid/packages/index.ts with resolvePackageImplementation() that resolves by package name first, then falls back to family default. NOT a hard-coded single-package map.
+- Built 3 genuinely different executable packages:
+  - WalkerAvatar (avatar): wanders randomly, emits step events, requests "jump" capability through the Kernel gate. Renders as a circle with direction indicator.
+  - CanalHouse (building): toggles occupancy when clicked, requests "building.enter" capability, emits occupied/vacated events. Renders as a building with windows + roof + occupancy indicator.
+  - TramVehicle (vehicle): moves along a route, boards passengers, requests "vehicle.board" capability. Renders as a rotated tram with passenger count badge.
+- Each package uses KernelContext exclusively — no globalThis, no direct DOM access. All state flows through ctx.getState()/setState().
+
+Fix #2 — Real Kernel capability enforcement:
+- The browser KernelContext.invokeCapability() now calls the server's /api/capabilities/negotiate endpoint, which computes the effective capability (entity × world × zone × experience).
+- The browser respects the result — NO auto-grant. If the server denies, the browser denies.
+- Results are cached per (entityId, capability) to avoid repeated calls.
+- The execution log shows "invokeCapability X → asking Kernel…" then "capability X → ALLOW/DENY/LIMIT".
+
+Fix #3 — Imported artifacts become certified RuntimeArtifacts:
+- /api/llm/import-package now creates a RuntimeArtifact row (target: playliquid-web, format: js-module, status: READY) — not just stored text.
+- The response includes runtimeArtifactId + runtimeArtifactTarget.
+- This is the link between "user's LLM produced text" and "the Package Executor can load and run it."
+
+Second independent renderer (proves engine independence):
+- Added a "Text renderer" alongside the canvas renderer. Both consume the same World Build.
+- The packages don't change — only the renderer does. This proves the renderer is replaceable.
+- A renderer selector lets the user switch between "Canvas renderer" and "Text renderer" live.
+
+SpinningMarker ABI conformance test fixed:
+- update() now uses ctx.getState()/setState() — no globalThis.__markerRotation.
+- All state flows through KernelContext. Serves as the canonical proof that the ABI works.
+
+Stale terminology:
+- Schema header: "9 permanent contracts" → "10 permanent contracts: Package, Specification, Contract, Entity, WorldProject, WorldBuild, Kernel, RuntimeAdapter, WorldNode, WorldService."
+- All references now consistently say 10 primitives, 12 laws.
+
+Stage Summary:
+- The browser runtime is now a REAL Package Executor: it resolves implementations from a registry (not hard-coded), calls the real Kernel for capability enforcement (no auto-grant), and runs 3 genuinely different packages through the ABI.
+- The renderer is replaceable: a text renderer and canvas renderer both consume the same World Build without changing package code.
+- Imported user-LLM artifacts become certified RuntimeArtifacts — the link between "LLM produced text" and "Package Executor can run it" is now explicit.
+- The SpinningMarker is a proper ABI conformance test with no escape hatches.
