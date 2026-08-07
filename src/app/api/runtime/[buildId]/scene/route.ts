@@ -22,7 +22,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ buildId: s
     include: {
       worldProject: true,
       packages: { include: { package: { include: { provides: true, requires: true, runtimeArtifacts: true } } } },
-      entities: { include: { package: { include: { provides: true, requires: true } } } },
+      entities: { include: { package: { include: { provides: true, requires: true, runtimeArtifacts: true } } } },
       nodes: true,
     },
   });

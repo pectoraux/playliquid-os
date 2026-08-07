@@ -1,7 +1,12 @@
-// PRIMITIVE K — Kernel (simulator adapter)
-// Small, frozen runtime: scheduler, event bus, entity lifecycle,
-// capability system, state. Networking/persistence/rendering are
-// *abstractions* to be implemented by future adapters — never baked in.
+// PRIMITIVE K — Kernel
+// The authoritative state store (state-store.ts) is now the real Kernel
+// state authority. This module retains the event bus, entity lifecycle,
+// and capability enforcement functions used by the Nodes panel and the
+// legacy API. The tick() function delegates to the state-store's
+// schedulerTick() for each running build.
+//
+// There is ONE Kernel authority: state-store.ts. This module is the
+// event bus + entity lifecycle layer that complements it.
 
 import { db } from "@/lib/db";
 import { mapKernelEvent } from "./mappers";
@@ -24,42 +29,30 @@ export async function recentEvents(limit = 50) {
 }
 
 // ── Scheduler ─────────────────────────────────────────────────────
-// One tick advances every running node's simulation: mutates a piece of
-// entity state and emits a capability.invoke event. This is the place
-// where future physics / AI / network ticks would hook in.
+// Delegates to the authoritative state store (state-store.ts).
+// The state-store is the real Kernel authority; this function ensures
+// the old /api/kernel/tick endpoint (used by the Nodes panel) advances
+// the same authoritative state as /api/runtime/:buildId/tick.
 export async function tick() {
   const runningNodes = await db.worldNode.findMany({
     where: { status: "running" },
-    include: {
-      worldBuild: { include: { entities: true } },
-    },
   });
 
   const emitted = [];
   for (const node of runningNodes) {
-    for (const entity of node.worldBuild.entities) {
-      // mutate position slightly (a toy "physics" tick)
-      const pos = JSON.parse(entity.position) as { x: number; y: number; z: number };
-      const dx = (Math.random() - 0.5) * 0.6;
-      const dz = (Math.random() - 0.5) * 0.6;
-      const next = { x: +(pos.x + dx).toFixed(2), y: pos.y, z: +(pos.z + dz).toFixed(2) };
-      await db.entity.update({
-        where: { id: entity.id },
-        data: { position: JSON.stringify(next) },
-      });
-      const ev = await emitEvent(
-        "scheduler.tick",
-        {
-          nodeId: node.id,
-          entityId: entity.id,
-          from: pos,
-          to: next,
-          host: node.host,
-        },
-        entity.id
-      );
-      emitted.push(ev);
-    }
+    // Delegate to the authoritative state store
+    const { initAuthoritativeState, schedulerTick } = await import("./state-store");
+    await initAuthoritativeState(node.worldBuildId);
+    const updated = schedulerTick(node.worldBuildId);
+
+    const ev = await emitEvent("scheduler.tick", {
+      nodeId: node.id,
+      buildId: node.worldBuildId,
+      entitiesUpdated: updated,
+      host: node.host,
+    });
+    emitted.push(ev);
+
     // heartbeat
     await emitEvent("node.heartbeat", {
       nodeId: node.id,

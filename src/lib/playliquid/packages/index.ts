@@ -26,12 +26,24 @@ import { WalkerAvatarImplementation } from "./walker-avatar";
 import { CanalHouseImplementation } from "./canal-house";
 import { TramVehicleImplementation } from "./tram-vehicle";
 
-// ── Built-in implementation registry ──────────────────────────────
-// These are the conformance test packages. In a full system, this
-// would be replaced by a dynamic module loader. For the MVP, the
-// loader resolves known packages here and returns null for unknown
-// ones (which the executor then renders as a fallback shape).
-const builtinImplementations: Map<string, PackageImplementation> = new Map([
+// ── DEVELOPMENT BOOTSTRAP REGISTRY ────────────────────────────────
+// WARNING: This is a DEVELOPMENT BOOTSTRAP, not the Package Runtime.
+//
+// In a production PlayLiquid system, the loader would fetch the
+// RuntimeArtifact from the API and dynamically load the JS module
+// from the artifactUri in a sandbox. This hard-coded Map is a
+// temporary mechanism for the MVP — it maps known package names to
+// their TypeScript implementations for testing.
+//
+// For packages NOT in this map (including user-LLM-imported packages),
+// the family fallback provides a default executable behavior. This
+// means any imported package IS executable — it gets the family's
+// default implementation. In a full system, the actual LLM-generated
+// JS code would be loaded instead.
+//
+// This registry MUST be replaced by a dynamic artifact loader before
+// the system can execute arbitrary certified RuntimeArtifacts.
+const devBootstrapRegistry: Map<string, PackageImplementation> = new Map([
   ["@playliquid/examples/spinning-marker", SpinningMarkerImplementation],
   ["@playliquid/avatars/walker-executable", WalkerAvatarImplementation],
   ["@playliquid/avatars/walker", WalkerAvatarImplementation],
@@ -64,9 +76,12 @@ export class PlayLiquidWebArtifactLoader implements RuntimeArtifactLoader {
     return target === "playliquid-web";
   }
 
-  // Resolve by package name + family (the MVP path)
+  // Resolve by package name + family
+  // Phase A: uses the dev bootstrap registry for known packages.
+  // Falls back to family default for unknown/imported packages.
+  // In production, this would dynamically load from the RuntimeArtifact.
   resolveByName(packageName: string, family: string): PackageImplementation | null {
-    return builtinImplementations.get(packageName) ?? familyFallbacks.get(family) ?? null;
+    return devBootstrapRegistry.get(packageName) ?? familyFallbacks.get(family) ?? null;
   }
 }
 
