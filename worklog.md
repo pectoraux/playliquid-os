@@ -363,3 +363,46 @@ Stage Summary:
 - The renderer is replaceable: a text renderer and canvas renderer both consume the same World Build without changing package code.
 - Imported user-LLM artifacts become certified RuntimeArtifacts — the link between "LLM produced text" and "Package Executor can run it" is now explicit.
 - The SpinningMarker is a proper ABI conformance test with no escape hatches.
+
+---
+Task ID: 9
+Agent: orchestrator (main)
+Task: Phase A — Generic Package Execution. Make the Runtime ABI genuinely generic.
+
+Work Log:
+Instance isolation:
+- PackageImplementation is now a FACTORY with createInstance() that returns a new PackageInstance per entity. No more global _ctx singletons. 10,000 walkers each get isolated state.
+- All 4 packages (SpinningMarker, WalkerAvatar, CanalHouse, TramVehicle) rewritten as classes implementing PackageInstance, with their own private ctx field.
+
+Engine-agnostic RenderContext:
+- Removed canvas-specific ctx2d from the ABI. RenderContext now exposes draw commands: drawRect, drawCircle, drawLine, drawText, drawPath, pushTransform, popTransform.
+- CanvasRenderContext adapter translates these commands to canvas-2d calls.
+- TextRenderContext adapter translates them to text logs (proves engine independence — the second adapter).
+- The package never knows what a Canvas is.
+
+Real RuntimeArtifactLoader:
+- PlayLiquidWebArtifactLoader implements the RuntimeArtifactLoader interface.
+- resolveByName() resolves implementations by package name, then falls back to family default.
+- In a full system, load() would fetch from the artifactUri and evaluate in a sandbox.
+
+Artifact validator (certification gate):
+- PackageArtifactValidator checks for dangerous patterns: direct fetch(), WebSocket, localStorage, globalThis, document, window — anything that would bypass the KernelContext.
+- /api/llm/import-package now runs validation before certification. Validation warnings are stored in the certification record.
+
+State Authority Law (new frozen law):
+- "The Kernel owns authoritative world state. Packages define and mutate logical state through the KernelContext, but the Kernel is the state authority — it persists, replicates, resolves conflicts, and enforces capability policies on state access. A package is the behavioral owner, not the authoritative state owner."
+
+Browser runtime rewritten as generic executor:
+- Uses artifactLoader.resolveByName() (not a hard-coded Map)
+- Creates PackageInstance per entity via createInstance()
+- Renders through CanvasRenderContext adapter (engine-agnostic commands)
+- Text renderer uses TextRenderContext adapter (proves engine independence)
+- Real Kernel capability enforcement (no auto-grant)
+
+13 frozen laws total. Architecture frozen. Next: Phase B (real Kernel) → Phase C (real multiplayer).
+
+Stage Summary:
+- The Package Executor is now generic: it resolves implementations through a loader, creates isolated instances per entity, and renders through an engine-agnostic command interface.
+- The RenderContext no longer leaks browser types. A Unity adapter would implement the same draw commands.
+- Imported artifacts go through ABI conformance validation before certification.
+- The Kernel owns authoritative state; packages are behavioral owners.
