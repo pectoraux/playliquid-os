@@ -82,6 +82,12 @@ function createFamilyFallback(family: string): PackageImplementation {
   return createDeclarativeImplementation(artifact);
 }
 
+// ── Strict mode ───────────────────────────────────────────────────
+// When true, family fallbacks are disabled. Packages without their own
+// declarative artifact (from the Scene API) are NOT executed.
+// This proves that imported packages run on their OWN artifact, not a fallback.
+const strictMode = typeof process !== "undefined" && process.env?.RUNTIME_STRICT === "true";
+
 // ── The real loader ───────────────────────────────────────────────
 export class GenericArtifactLoader implements RuntimeArtifactLoader {
   // Cache of loaded artifacts (by package name)
@@ -101,7 +107,9 @@ export class GenericArtifactLoader implements RuntimeArtifactLoader {
   // ── Resolve by package name + family ───────────────────────────
   // 1. Check dev bootstrap (conformance test packages only)
   // 2. Check if we have a cached declarative implementation
-  // 3. Fall back to family default (declarative)
+  // 3. In NON-strict mode: fall back to family default (declarative)
+  //    In STRICT mode: return null (no fallback — the package must have
+  //    its own declarative artifact from the Scene API)
   resolveByName(packageName: string, family: string): PackageImplementation | null {
     // 1. Dev bootstrap (conformance tests only)
     const builtin = devBootstrapRegistry.get(packageName);
@@ -111,7 +119,13 @@ export class GenericArtifactLoader implements RuntimeArtifactLoader {
     const cached = this.cache.get(packageName);
     if (cached) return cached;
 
-    // 3. Family fallback (declarative — any package is executable)
+    // 3. Family fallback — ONLY in non-strict mode.
+    //    In strict mode (RUNTIME_STRICT=true), packages without their own
+    //    declarative artifact are NOT executed. This prevents the system
+    //    from silently substituting a generic family implementation.
+    if (strictMode) {
+      return null;
+    }
     return createFamilyFallback(family);
   }
 

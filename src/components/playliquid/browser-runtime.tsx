@@ -253,42 +253,38 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
 
   // Initialize package instances — the EXACT artifact execution path.
   //
-  // Priority:
-  //   1. If the entity has a declarativeArtifact (from the Scene API),
-  //      validate + parse it and create a DeclarativePackageInstance.
-  //      This is the EXACT package the LLM produced — no family fallback.
-  //   2. If no declarative artifact, check the dev bootstrap (conformance
-  //      test packages only).
-  //   3. If neither, use the family fallback (declarative default).
+  // The browser runtime is GENERIC. It does not know what an avatar,
+  // building, vehicle, or player is. Every entity gets its behavior
+  // from a PackageInstance loaded from a declarative artifact.
   //
-  // This means: delete every family fallback → imported packages STILL RUN
-  // because they have their own declarativeArtifact from the Scene API.
+  // For scene entities: the artifact comes from the Scene API
+  //   (entity.declarativeArtifact — the exact LLM-produced JSON).
+  // For player avatars: a declarative artifact is synthesized from
+  //   the player's state (color, name, direction) — the browser still
+  //   doesn't render them directly; the DeclarativePackageInstance does.
   useEffect(() => {
     if (!scene) return;
+
+    // ── Scene entities ──
     for (const entity of scene.entities) {
       if (!entity.package) continue;
       if (packageInstancesRef.current.has(entity.id)) continue;
 
       let impl: PackageImplementation | null = null;
-      let usedExactArtifact = false;
 
-      // 1. EXACT ARTIFACT: if the entity has a declarative artifact from
-      //    the Scene API, validate + create an implementation from it.
+      // 1. EXACT ARTIFACT: the entity's declarative artifact from the Scene API.
       //    This is the LLM's EXACT package — not a family fallback.
       if (entity.declarativeArtifact) {
         const validation = validateDeclarativeArtifact(entity.declarativeArtifact);
         if (validation.valid && validation.artifact) {
           impl = createDeclarativeImplementation(validation.artifact);
-          usedExactArtifact = true;
         }
       }
 
-      // 2. Dev bootstrap (conformance test packages only)
+      // 2. Dev bootstrap (conformance test packages only — NOT for imported packages)
       if (!impl) {
         impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
       }
-
-      // 3. impl is never null (resolveByName always returns a family fallback)
 
       if (impl) {
         const ctx = createKernelContext(entity);
@@ -302,7 +298,87 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
         packageInstancesRef.current.set(entity.id, instance);
       }
     }
-  }, [scene, createKernelContext]);
+
+    // ── Player avatars from SSE ──
+    // Player avatars are NOT in the scene's DB entities — they're spawned
+    // dynamically by createSession. They still need a PackageInstance to render.
+    // We synthesize a declarative artifact from the player's state.
+    const sceneEntityIds = new Set(scene.entities.map((e) => e.id));
+    for (const [entityId, auth] of authStateRef.current.entries()) {
+      if (sceneEntityIds.has(entityId)) continue;
+      if (packageInstancesRef.current.has(entityId)) continue;
+
+      const isPlayer = (auth.state.isPlayer as boolean) ?? false;
+      if (!isPlayer) continue;
+
+      // Synthesize a declarative artifact for the player avatar.
+      // The browser still doesn't render this directly — the
+      // DeclarativePackageInstance interprets it through the ABI.
+      const color = (auth.state.color as string) ?? "#a78bfa";
+      const name = (auth.state.name as string) ?? "Player";
+      const playerArtifact = {
+        abiVersion: "1.0.0",
+        name: `@playliquid/player/${entityId}`,
+        displayName: name,
+        family: "avatar",
+        capabilities: ["avatar.movement"],
+        provides: ["avatar.movement"],
+        requires: ["navigation.walkable"],
+        initialState: { direction: 0, color, name },
+        update: { behavior: "static" as const, params: {} },
+        render: {
+          behavior: "shape" as const,
+          params: {
+            shape: "circle" as const,
+            size: 10,
+            color,
+            showDirection: true,
+            label: name,
+          },
+        },
+        onClick: { behavior: "emit" as const, params: { event: "player.click" } },
+      };
+      const impl = createDeclarativeImplementation(playerArtifact);
+      const ctx: KernelContext = {
+        entityId,
+        entityName: name,
+        getPosition: () => auth.position,
+        requestMovement: (delta) => {
+          if (!buildId) return;
+          fetch(`/api/runtime/${buildId}/mutate`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entityId, positionPatch: delta }),
+          }).catch(() => {});
+        },
+        getState: () => auth.state,
+        setState: (patch) => {
+          if (!buildId) return;
+          fetch(`/api/runtime/${buildId}/mutate`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entityId, statePatch: patch }),
+          }).catch(() => {});
+        },
+        emit: (event, payload) => {
+          (eventHandlersRef.current.get(event) ?? []).forEach((h) => h(payload));
+        },
+        on: (event, handler) => {
+          if (!eventHandlersRef.current.has(event)) eventHandlersRef.current.set(event, []);
+          eventHandlersRef.current.get(event)!.push(handler);
+        },
+        invokeCapability: async () => ({ granted: true, action: "allow" as const }),
+        requestService: async () => ({ ok: true }),
+        log: () => {},
+      };
+      const instance = impl.createInstance();
+      instance.initialize(ctx, {
+        name: playerArtifact.name, displayName: name,
+        family: "avatar", version: "1.0.0", specification: {},
+        capabilities: playerArtifact.capabilities, provides: [], requires: [],
+      });
+      instance.mount();
+      packageInstancesRef.current.set(entityId, instance);
+    }
+  }, [scene, createKernelContext, buildId]);
 
   // ── Phase F: WASD/arrow key movement ──────────────────────────────
   // The player moves their avatar. Movement goes through the Kernel
@@ -443,69 +519,56 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
         ctx2d.fillText(a.semanticId.split(".").pop() ?? a.semanticId, cx + 10, cy - 6);
       }
 
-      // Render entities from AUTHORITATIVE state
-      for (const entity of s.entities) {
-        const authState = authStateRef.current.get(entity.id);
-        const pos = authState?.position ?? entity.position;
-        const state = authState?.state ?? entity.state;
-        const cx = W / 2 + pos.x * scale, cy = H / 2 + pos.z * scale;
+      // ── Render ALL entities through the Package Executor ──
+      // The browser runtime knows NOTHING about families, avatars, buildings,
+      // or player types. It just:
+      //   1. Iterates all entities (from the scene + player avatars from SSE)
+      //   2. Finds their PackageInstance (loaded from the declarative artifact)
+      //   3. Calls instance.render(rc) — the package draws itself
+      //
+      // No family conditionals. No fallback circles. No player-specific rendering.
+      // If a package has no instance, it doesn't render (strict mode).
+
+      // Collect ALL renderable entities: scene entities + player avatars from SSE
+      const sceneEntityIds = new Set(s.entities.map((e) => e.id));
+      const allRenderable: Array<{
+        id: string;
+        name: string;
+        position: { x: number; y: number; z: number };
+      }> = [
+        // Scene entities (from DB)
+        ...s.entities.map((e) => ({
+          id: e.id,
+          name: e.name,
+          position: authStateRef.current.get(e.id)?.position ?? e.position,
+        })),
+        // Player avatars (from SSE authoritative state, not in scene DB)
+        ...Array.from(authStateRef.current.entries())
+          .filter(([id]) => !sceneEntityIds.has(id))
+          .map(([id, auth]) => ({
+            id,
+            name: (auth.state.name as string) ?? "Player",
+            position: auth.position,
+          })),
+      ];
+
+      for (const entity of allRenderable) {
+        const cx = W / 2 + entity.position.x * scale;
+        const cy = H / 2 + entity.position.z * scale;
         if (cx < 0 || cx > W || cy < 0 || cy > H) continue;
 
         const inst = packageInstancesRef.current.get(entity.id);
         const isSelected = selectedEntity === entity.id;
+
         if (inst) {
-          const rc = new CanvasRenderContext(ctx2d, cx, cy, pos.x, pos.y, pos.z, scale, isSelected);
+          // The package renders ITSELF through the RenderContext.
+          // The browser has no idea what shape/color/behavior it will draw.
+          const rc = new CanvasRenderContext(ctx2d, cx, cy, entity.position.x, entity.position.y, entity.position.z, scale, isSelected);
           inst.render(rc);
-        } else {
-          ctx2d.fillStyle = "#666"; ctx2d.beginPath(); ctx2d.arc(cx, cy, 5, 0, Math.PI * 2); ctx2d.fill();
         }
-        if (isSelected || s.entities.length < 15) {
-          ctx2d.fillStyle = "rgba(255,255,255,0.7)"; ctx2d.font = "9px monospace";
-          ctx2d.fillText(entity.name.slice(0, 18), cx + 14, cy + 3);
-        }
-      }
-
-      // ── Phase F: Render player avatars from authoritative state ──
-      // Avatars are entities that exist in the authoritative state but
-      // NOT in the scene's DB entities (they're spawned dynamically by
-      // createSession). They are real multiplayer presences.
-      const sceneEntityIds = new Set(s.entities.map((e) => e.id));
-      for (const [entityId, auth] of authStateRef.current.entries()) {
-        if (sceneEntityIds.has(entityId)) continue; // already rendered above
-        const isPlayer = (auth.state.isPlayer as boolean) ?? false;
-        if (!isPlayer) continue;
-
-        const cx = W / 2 + auth.position.x * scale;
-        const cy = H / 2 + auth.position.z * scale;
-        if (cx < 0 || cx > W || cy < 0 || cy > H) continue;
-
-        const name = (auth.state.name as string) ?? "Player";
-        const color = (auth.state.color as string) ?? "#a78bfa";
-        const direction = (auth.state.direction as number) ?? 0;
-        const isYou = auth.state.sessionId === sessionId;
-
-        // Draw player avatar as a distinct circle
-        const size = 10;
-        ctx2d.fillStyle = color;
-        ctx2d.strokeStyle = isYou ? "#ffffff" : "rgba(0,0,0,0.3)";
-        ctx2d.lineWidth = isYou ? 2 : 1;
-        ctx2d.beginPath();
-        ctx2d.arc(cx, cy, size, 0, Math.PI * 2);
-        ctx2d.fill();
-        ctx2d.stroke();
-
-        // Direction indicator
-        ctx2d.strokeStyle = "rgba(255,255,255,0.7)";
-        ctx2d.lineWidth = 1.5;
-        ctx2d.beginPath();
-        ctx2d.moveTo(cx, cy);
-        ctx2d.lineTo(cx + Math.cos(direction) * size * 1.5, cy + Math.sin(direction) * size * 1.5);
-        ctx2d.stroke();
-
-        // Name label
-        ctx2d.fillStyle = isYou ? "#ffffff" : "rgba(255,255,255,0.6)";
-        ctx2d.font = `${isYou ? "bold " : ""}9px monospace`;
-        ctx2d.fillText(`${name}${isYou ? " (you)" : ""}`, cx + size + 2, cy + 3);
+        // If no instance: in strict mode, the entity is invisible.
+        // The browser does NOT draw a fallback shape — that would be
+        // family-based rendering pretending to be generic execution.
       }
 
       // HUD
