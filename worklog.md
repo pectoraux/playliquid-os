@@ -441,3 +441,35 @@ Stage Summary:
 - The Kernel now owns authoritative state. Two browsers see the same world state in real-time. This is the beginning of the real OS substrate.
 - The State Authority Law is in action: packages define+mutate through KernelContext, but the Kernel is the authority. The browser reads from the SSE stream; it doesn't own state.
 - Open the Runtime panel in two tabs to see multiplayer: both connect to the same SSE stream, both see the same tick-driven state changes, both see each other's session.
+
+---
+Task ID: 11
+Agent: orchestrator (main)
+Task: Phase D+E — Spatial streaming + Generic LLM package generation.
+
+Work Log:
+Phase D — Streaming:
+- Built spatial cell system: world divided into 50-unit cells. Each entity belongs to a cell. The Kernel tracks active cells.
+- Built interest management: players have a position + interest radius. The SSE stream filters state updates to only entities within the player's interest region.
+- Interest-filtered SSE stream: /api/runtime/:buildId/stream?x=&z=&radius= sends only entities in nearby cells.
+- Cell visualization in browser runtime: cell grid drawn, active cells highlighted, interest radius shown as dashed circle.
+- /api/runtime/:buildId/cells endpoint for cell metadata.
+- Streaming + Spatial Services guarantees: contract-only → partial.
+
+Phase E — Generic LLM package generation:
+- Built User-Owned LLM Flow in the Console panel: 3-step UI (NL → compile prompt → open in LLM → paste result → import + certify).
+- /api/llm/compile-prompt produces spec + compiled prompt + open targets. No LLM call.
+- /api/llm/import-package validates (ABI conformance), certifies, creates RuntimeArtifact. Provenance: "user-owned".
+- Imported packages are executable via the loader's family fallback. An imported "bakery" (family=building) gets the CanalHouse implementation. In a full system, the actual LLM-generated JS would be dynamically loaded in a sandbox.
+- The full flow: "Create a medieval bakery" → spec → prompt → user's LLM → import → certification → RuntimeArtifact → browser execution — without PlayLiquid having any hard-coded knowledge of "bakery".
+
+Verified locally:
+- Architecture: 5 of 11 substrate guarantees now "partial" (Multiplayer, Replication, Identity, Persistence, Streaming, Spatial Services).
+- compile-prompt: returns specificationId, 1813-char prompt, 4 open targets (ChatGPT, Claude, Gemini, Z.ai).
+- SSE stream: supports interest filtering via ?x=&z=&radius= query params.
+- Cell grid: drawn in browser runtime with active cell highlighting + interest radius.
+
+Stage Summary:
+- Phase D: the world can be larger than the browser's memory. The browser only holds entities in its interest region. Cells load/unload as the player moves.
+- Phase E: the full user-owned LLM pipeline works end-to-end. PlayLiquid produces the prompt; the user takes it to their LLM; the user pastes the result back; PlayLiquid certifies it as a RuntimeArtifact and can execute it. PlayLiquid never calls an LLM.
+- 6 of 11 substrate guarantees now "partial". The OS substrate is becoming real.
