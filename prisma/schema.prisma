@@ -1,0 +1,203 @@
+// Playliquid OS — Frozen Primitives Schema
+// 9 permanent contracts: Package, Specification, Interface, Entity,
+// WorldProject, WorldBuild, Kernel, RuntimeAdapter(via WorldNode), WorldNode.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #1 — PACKAGE
+// Everything that exists in a World is a Package.
+// ════════════════════════════════════════════════════════════════
+model Package {
+  id            String   @id @default(cuid())
+  name          String   @unique // scoped e.g. "@playliquid/buildings/amsterdam-canal-house"
+  displayName   String
+  description   String
+  family        String   // avatar | building | road | vehicle | physics | weather | renderer | sensory | ...
+  version       String   // semver
+  hash          String   @unique // content hash of manifest+specification+artifact
+  manifest      String   // JSON: full manifest
+  specification String   // JSON: canonical Specification IR
+  artifactUri   String?  // where the generated artifact lives
+  provenance    String   // JSON: { generator, llmProvider, model, generatedAt, source }
+  certification String   // JSON: { signed, level, by, checks[] }
+  license       String   // SPDX identifier e.g. "MIT"
+  capabilities  String   // JSON array of capability strings
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  specRefId String?
+  specRef   Specification? @relation(fields: [specRefId], references: [id])
+
+  provides       Interface[] @relation("PackageProvides")
+  requires       Interface[] @relation("PackageRequires")
+  buildPackages  WorldBuildPackage[]
+  entities       Entity[]
+  generationReq  GenerationRequest?
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #3 — INTERFACE / CONTRACT
+// Capability families. Packages provide / require them. The Composer wires.
+// ════════════════════════════════════════════════════════════════
+model Interface {
+  id          String  @id @default(cuid())
+  name        String  // e.g. "spatial.anchor", "avatar.movement"
+  family      String  // e.g. "spatial", "avatar", "physics", "sensory"
+  version     String
+  direction   String  // "provides" | "requires"
+  schema      String  // JSON schema describing the contract
+  description String
+
+  packageProvidedById String?
+  packageProvidedBy   Package? @relation("PackageProvides", fields: [packageProvidedById], references: [id], onDelete: Cascade)
+
+  packageRequiredById String?
+  packageRequiredBy   Package? @relation("PackageRequires", fields: [packageRequiredById], references: [id], onDelete: Cascade)
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #2 — SPECIFICATION
+// The canonical truth. Distinct from NL, prompt, and artifact.
+// ════════════════════════════════════════════════════════════════
+model Specification {
+  id              String   @id @default(cuid())
+  naturalLanguage String?  // original user input (kept for provenance)
+  canonical       String   // JSON canonical IR
+  kind            String   // "package" | "world" | "entity"
+  theme           String?  // JSON world-theme reference
+  spatialRules    String?  // JSON
+  policies        String?  // JSON
+  createdAt       DateTime @default(now())
+
+  packages      Package[]
+  worldProjects WorldProject[]
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #4 — WORLD PROJECT
+// Git-like collaborative source repository for a World.
+// ════════════════════════════════════════════════════════════════
+model WorldProject {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  description     String
+  theme           String   // JSON: { era, artDirection, scale, coordinateSystem, ... }
+  rules           String   // JSON: world rules
+  packageManifest String   // JSON: declared package refs
+  contributors    String   // JSON array
+  specificationId String?
+  specification   Specification? @relation(fields: [specificationId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  builds WorldBuild[]
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #6 — WORLD BUILD
+// Immutable, reproducible artifact of a composed World.
+// ════════════════════════════════════════════════════════════════
+model WorldBuild {
+  id             String   @id @default(cuid())
+  version        Int      // build number for the project
+  worldProjectId String
+  worldProject   WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
+  manifest       String   // immutable JSON: package versions, resolved deps, interface connections, spatial graph, capability policies, runtime config
+  hash           String   @unique
+  status         String   // "draft" | "composed" | "ready"
+  createdAt      DateTime @default(now())
+
+  packages WorldBuildPackage[]
+  nodes    WorldNode[]
+  entities Entity[]
+}
+
+model WorldBuildPackage {
+  id           String      @id @default(cuid())
+  worldBuildId String
+  worldBuild   WorldBuild  @relation(fields: [worldBuildId], references: [id], onDelete: Cascade)
+  packageId    String
+  package      Package     @relation(fields: [packageId], references: [id])
+  resolvedAt   DateTime    @default(now())
+
+  @@unique([worldBuildId, packageId])
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #5 — ENTITY
+// A Package instantiated into a running World.
+// ════════════════════════════════════════════════════════════════
+model Entity {
+  id           String   @id @default(cuid())
+  worldBuildId String
+  worldBuild   WorldBuild @relation(fields: [worldBuildId], references: [id], onDelete: Cascade)
+  packageId    String
+  package      Package  @relation(fields: [packageId], references: [id])
+  name         String
+  position     String   // JSON { x, y, z }
+  components   String   // JSON array
+  state        String   // JSON
+  createdAt    DateTime @default(now())
+
+  events KernelEvent[]
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #9 — WORLD NODE
+// A deployable runtime instance of a Build. Host = impl detail.
+// ════════════════════════════════════════════════════════════════
+model WorldNode {
+  id           String      @id @default(cuid())
+  worldBuildId String
+  worldBuild   WorldBuild  @relation(fields: [worldBuildId], references: [id], onDelete: Cascade)
+  host         String      // "vercel" | "aws" | "local" | "edge"
+  endpoint     String      // standardized discovery endpoint
+  status       String      // "starting" | "running" | "stopped" | "error"
+  health       String      // JSON metrics
+  capabilities String      // JSON
+  startedAt    DateTime?
+  createdAt    DateTime    @default(now())
+}
+
+// ════════════════════════════════════════════════════════════════
+// PRIMITIVE #7 — KERNEL
+// Event bus + scheduler traces. The Kernel itself is the runtime;
+// these rows are the observable record of its operation.
+// ════════════════════════════════════════════════════════════════
+model KernelEvent {
+  id        String   @id @default(cuid())
+  entityId  String?
+  entity    Entity?  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  type      String   // "scheduler.tick" | "entity.spawn" | "capability.invoke" | "state.mutate" | ...
+  payload   String   // JSON
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([type])
+}
+
+// ════════════════════════════════════════════════════════════════
+// PIPELINE — GENERATION REQUEST
+// Traces the NL → Specification → Prompt → LLM → Package pipeline.
+// ════════════════════════════════════════════════════════════════
+model GenerationRequest {
+  id            String   @id @default(cuid())
+  input         String   // natural language
+  specification String   // JSON canonical IR produced
+  prompt        String   // compiled prompt
+  provider      String   // "zai" | "claude" | "gemini" | "local" | ...
+  status        String   // "specifying" | "resolving" | "prompting" | "generating" | "done" | "error"
+  packageId     String?  @unique
+  package       Package? @relation(fields: [packageId], references: [id])
+  log           String   // JSON pipeline trace
+  createdAt     DateTime @default(now())
+}
