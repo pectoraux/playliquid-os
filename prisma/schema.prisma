@@ -1,6 +1,6 @@
 // Playliquid OS — Frozen Primitives Schema
-// 9 permanent contracts: Package, Specification, Interface, Entity,
-// WorldProject, WorldBuild, Kernel, RuntimeAdapter(via WorldNode), WorldNode.
+// 10 permanent contracts: Package, Specification, Contract, Entity,
+// WorldProject, WorldBuild, Kernel, RuntimeAdapter, WorldNode, WorldService.
 
 generator client {
   provider = "prisma-client-js"
