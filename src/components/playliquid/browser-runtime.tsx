@@ -1,21 +1,17 @@
 "use client";
 
 // ════════════════════════════════════════════════════════════════
-// PLAYLIQUID WEB RUNTIME — Real Multiplayer
+// PLAYLIQUID 3D WEB RUNTIME — Three.js Package Executor
 // ════════════════════════════════════════════════════════════════
 //
-// Phase B+C: The browser runtime now reads from the AUTHORITATIVE state
-// stream (SSE), not from local state. When entity A moves on one browser,
-// the Kernel updates authoritative state, and ALL browsers see the change
-// in real-time. This is real multiplayer at the state-synchronization level.
+// The world is now 3D. The browser runtime uses Three.js as the render
+// adapter. Packages still issue engine-agnostic draw commands through
+// RenderContext — the ThreeRenderContext adapter translates them to
+// Three.js meshes.
 //
-// The flow:
-//   1. Browser subscribes to /api/runtime/:buildId/stream (SSE)
-//   2. Kernel sends initial state snapshot
-//   3. Browser renders from authoritative state
-//   4. Packages request mutations via /api/runtime/:buildId/mutate
-//   5. Kernel updates authoritative state + replicates to all clients
-//   6. All browsers see the same state
+// The browser runtime is still GENERIC — it doesn't know what an avatar,
+// building, or player is. It loads declarative artifacts and executes
+// them through the PackageExecutor.
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,15 +22,16 @@ import {
 } from "@/components/ui/select";
 import {
   Monitor, Play, Pause, Crosshair, Box, Anchor, Radio, Cpu, Terminal,
-  Layers, Shield, ShieldCheck, Users, Wifi, Zap,
+  Shield, ShieldCheck, Users, Wifi, Zap, Layers,
 } from "lucide-react";
+import * as THREE from "three";
 import type {
-  KernelContext, PackageInstance, PackageImplementation, RenderContext, DrawOpts, TextOpts,
+  KernelContext, PackageInstance, PackageImplementation, RenderContext, DrawOpts, TextOpts, DrawOpts3D,
 } from "@/lib/playliquid/package-abi";
 import { artifactLoader } from "@/lib/playliquid/packages";
 import { validateDeclarativeArtifact, createDeclarativeImplementation } from "@/lib/playliquid/declarative-artifact";
 
-// ── Scene + state types ───────────────────────────────────────────
+// ── Scene types ───────────────────────────────────────────────────
 interface SceneEntity {
   id: string; name: string;
   package: { name: string; family: string; displayName: string } | null;
@@ -51,77 +48,128 @@ interface WorldScene {
   runtime: { adapter: string; theme: string; coordinateSystem: string; protocolVersion: string };
   nodes: Array<{ id: string; host: string; status: string }>;
 }
-
-// Authoritative state received from the SSE stream
 interface AuthoritativeEntity {
   position: { x: number; y: number; z: number };
   state: Record<string, unknown>;
 }
-interface SessionInfo {
-  sessionId: string; name: string; connectedAt: number;
+interface SessionInfo { sessionId: string; name: string; connectedAt: number; }
+
+// ── ThreeRenderContext: translates draw commands to Three.js meshes ──
+class ThreeRenderContext implements RenderContext {
+  public screenX = 0; public screenY = 0;
+  public scale = 1; public selected = false;
+
+  private currentMesh: THREE.Mesh | null = null;
+  private currentGroup: THREE.Group;
+
+  constructor(
+    private scene: THREE.Scene,
+    public worldX: number,
+    public worldY: number,
+    public worldZ: number,
+    private meshCache: Map<string, THREE.Mesh>,
+    private entityId: string,
+  ) {
+    this.currentGroup = new THREE.Group();
+    this.currentGroup.position.set(worldX, worldY, worldZ);
+  }
+
+  // 3D commands
+  drawBox(w: number, h: number, d: number, opts: DrawOpts3D): void {
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const mat = new THREE.MeshStandardMaterial({
+      color: opts.color,
+      emissive: opts.emissive ?? new THREE.Color(opts.color).multiplyScalar(0.2),
+      metalness: opts.metalness ?? 0.3,
+      roughness: opts.roughness ?? 0.7,
+      transparent: opts.opacity !== undefined && opts.opacity < 1,
+      opacity: opts.opacity ?? 1,
+      wireframe: opts.wireframe ?? false,
+    });
+    this.currentMesh = new THREE.Mesh(geo, mat);
+    this.currentGroup.add(this.currentMesh);
+  }
+
+  drawSphere(r: number, opts: DrawOpts3D): void {
+    const geo = new THREE.SphereGeometry(r, 24, 16);
+    const mat = new THREE.MeshStandardMaterial({
+      color: opts.color,
+      emissive: opts.emissive ?? new THREE.Color(opts.color).multiplyScalar(0.3),
+      metalness: opts.metalness ?? 0.3,
+      roughness: opts.roughness ?? 0.7,
+      transparent: opts.opacity !== undefined && opts.opacity < 1,
+      opacity: opts.opacity ?? 1,
+      wireframe: opts.wireframe ?? false,
+    });
+    this.currentMesh = new THREE.Mesh(geo, mat);
+    this.currentGroup.add(this.currentMesh);
+  }
+
+  drawCylinder(rt: number, rb: number, h: number, opts: DrawOpts3D): void {
+    const geo = new THREE.CylinderGeometry(rt, rb, h, 16);
+    const mat = new THREE.MeshStandardMaterial({ color: opts.color, emissive: opts.emissive });
+    this.currentMesh = new THREE.Mesh(geo, mat);
+    this.currentGroup.add(this.currentMesh);
+  }
+
+  drawCone(r: number, h: number, opts: DrawOpts3D): void {
+    const geo = new THREE.ConeGeometry(r, h, 16);
+    const mat = new THREE.MeshStandardMaterial({ color: opts.color, emissive: opts.emissive });
+    this.currentMesh = new THREE.Mesh(geo, mat);
+    this.currentGroup.add(this.currentMesh);
+  }
+
+  drawMesh(_vertices: number[], _indices: number[], _opts: DrawOpts3D): void { /* future */ }
+  setPosition(x: number, y: number, z: number): void { this.currentGroup.position.set(x, y, z); }
+  setRotation(x: number, y: number, z: number): void { this.currentGroup.rotation.set(x, y, z); }
+  setScale(s: number): void { this.currentGroup.scale.setScalar(s); }
+  drawText3D?(_x: number, _y: number, _z: number, _text: string, _opts: TextOpts): void { /* future: sprite text */ }
+
+  // 2D commands (no-ops in 3D mode — the text renderer uses these)
+  drawRect(): void {}
+  drawCircle(): void {}
+  drawLine(): void {}
+  drawText(): void {}
+  drawPath(): void {}
+  pushTransform(): void {}
+  popTransform(): void {}
+
+  // Called by the executor after render() to commit the group to the scene
+  commit(): THREE.Group {
+    return this.currentGroup;
+  }
 }
 
-// ── CanvasRenderContext adapter ───────────────────────────────────
-class CanvasRenderContext implements RenderContext {
-  constructor(
-    private ctx: CanvasRenderingContext2D,
-    public screenX: number, public screenY: number,
-    public worldX: number, public worldY: number, public worldZ: number,
-    public scale: number, public selected: boolean
-  ) {}
-  drawRect(x: number, y: number, w: number, h: number, opts: DrawOpts): void {
-    if (opts.fill) { this.ctx.fillStyle = opts.fill; this.ctx.fillRect(x, y, w, h); }
-    if (opts.stroke) { this.ctx.strokeStyle = opts.stroke; this.ctx.lineWidth = opts.strokeWidth ?? 1; this.ctx.strokeRect(x, y, w, h); }
-  }
-  drawCircle(x: number, y: number, r: number, opts: DrawOpts): void {
-    this.ctx.beginPath(); this.ctx.arc(x, y, r, 0, Math.PI * 2);
-    if (opts.fill) { this.ctx.fillStyle = opts.fill; this.ctx.fill(); }
-    if (opts.stroke) { this.ctx.strokeStyle = opts.stroke; this.ctx.lineWidth = opts.strokeWidth ?? 1; this.ctx.stroke(); }
-  }
-  drawLine(x1: number, y1: number, x2: number, y2: number, opts: DrawOpts): void {
-    this.ctx.strokeStyle = opts.stroke ?? "#fff"; this.ctx.lineWidth = opts.strokeWidth ?? 1;
-    this.ctx.beginPath(); this.ctx.moveTo(x1, y1); this.ctx.lineTo(x2, y2); this.ctx.stroke();
-  }
-  drawText(x: number, y: number, text: string, opts: TextOpts): void {
-    this.ctx.fillStyle = opts.color ?? "#fff"; this.ctx.font = `${opts.size ?? 10}px monospace`;
-    if (opts.align) this.ctx.textAlign = opts.align; this.ctx.fillText(text, x, y); this.ctx.textAlign = "left";
-  }
-  drawPath(points: Array<{ x: number; y: number }>, opts: DrawOpts): void {
-    if (points.length < 2) return;
-    this.ctx.beginPath(); this.ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) this.ctx.lineTo(points[i].x, points[i].y);
-    this.ctx.closePath();
-    if (opts.fill) { this.ctx.fillStyle = opts.fill; this.ctx.fill(); }
-    if (opts.stroke) { this.ctx.strokeStyle = opts.stroke; this.ctx.lineWidth = opts.strokeWidth ?? 1; this.ctx.stroke(); }
-  }
-  pushTransform(x: number, y: number, rotation: number, scale: number): void {
-    this.ctx.save(); this.ctx.translate(x, y); this.ctx.rotate(rotation); this.ctx.scale(scale, scale);
-  }
-  popTransform(): void { this.ctx.restore(); }
-}
+// ── Capability cache ──────────────────────────────────────────────
+const capabilityCache = new Map<string, { granted: boolean; action: string }>();
 
 interface BrowserRuntimeProps { buildId: string | null; }
 
 export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mountRef = useRef<HTMLDivElement>(null);
   const [scene, setScene] = useState<WorldScene | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [renderer, setRenderer] = useState<"canvas" | "text">("canvas");
+  const [renderer, setRenderer] = useState<"3d" | "text">("3d");
   const [textOutput, setTextOutput] = useState("");
   const [tickCount, setTickCount] = useState(0);
+  const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
 
-  // Authoritative state — received from the SSE stream, NOT held locally
-  const authStateRef = useRef<Map<string, AuthoritativeEntity>>(new Map());
   const sceneRef = useRef<WorldScene | null>(null);
+  const authStateRef = useRef<Map<string, AuthoritativeEntity>>(new Map());
   const packageInstancesRef = useRef<Map<string, PackageInstance>>(new Map());
-  const animationRef = useRef<number>(0);
   const eventHandlersRef = useRef<Map<string, Array<(p: Record<string, unknown>) => void>>>(new Map());
+  const threeSceneRef = useRef<THREE.Scene | null>(null);
+  const threeRendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const threeCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const entityGroupsRef = useRef<Map<string, THREE.Group>>(new Map());
+  const animationRef = useRef<number>(0);
+  const keysRef = useRef<Record<string, boolean>>({});
+  const cameraAngleRef = useRef({ theta: 0, phi: 0.6, distance: 40 });
 
-  // Fetch scene (static — world structure)
+  // Fetch scene
   useEffect(() => {
     if (!buildId) return;
     let cancelled = false;
@@ -156,10 +204,7 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
     };
   }, [buildId]);
 
-  // ── SSE: subscribe to authoritative state stream ──────────────────
-  // This is the replication layer. All connected browsers receive the
-  // same state updates. When entity A moves on browser 1, browser 2
-  // sees it in real-time.
+  // SSE stream
   useEffect(() => {
     if (!buildId) return;
     const es = new EventSource(`/api/runtime/${buildId}/stream`);
@@ -169,7 +214,6 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       try {
         const msg = JSON.parse(ev.data);
         if (msg.type === "snapshot") {
-          // Initial state
           const map = new Map<string, AuthoritativeEntity>();
           for (const e of (msg.entities as Array<{ entityId: string; position: { x: number; y: number; z: number }; state: Record<string, unknown> }>)) {
             map.set(e.entityId, { position: e.position, state: e.state });
@@ -177,19 +221,17 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
           authStateRef.current = map;
           setSessions(msg.sessions ?? []);
         } else if (msg.type === "state") {
-          // Incremental state update — this is the replication
           authStateRef.current.set(msg.entityId, { position: msg.position, state: msg.state });
         } else if (msg.type === "event") {
           if (msg.event === "session.join" || msg.event === "session.leave") {
-            // Refresh sessions
             fetch(`/api/runtime/${buildId}/session`, {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ action: "list" }),
             }).then(r => r.json()).then(data => setSessions(data.sessions ?? [])).catch(() => {});
           }
           if (msg.event === "entity.remove") {
-            // Remove the avatar from local authoritative state
             authStateRef.current.delete(msg.entityId);
+            entityGroupsRef.current.delete(msg.entityId);
           }
         }
       } catch { /* parse error */ }
@@ -197,362 +239,283 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
     return () => { es.close(); setConnected(false); };
   }, [buildId]);
 
-  // ── KernelContext: requests go to the authoritative Kernel ────────
-  // Packages don't hold state locally — they request mutations through
-  // the Kernel API, which updates authoritative state + replicates.
-  const createKernelContext = useCallback((entity: SceneEntity): KernelContext => {
-    const entityId = entity.id;
-    const buildIdLocal = buildId!;
+  // Real Kernel capability enforcement
+  const invokeCapabilityReal = useCallback(async (entityId: string, capability: string) => {
+    const cacheKey = `${entityId}:${capability}`;
+    if (capabilityCache.has(cacheKey)) return capabilityCache.get(cacheKey)!;
+    const s = sceneRef.current;
+    if (!s) return { granted: false, action: "deny" as const };
+    try {
+      const res = await fetch("/api/capabilities/negotiate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId: s.entities.find((e) => e.id === entityId)?.package?.name, worldProjectId: s.world.id }),
+      });
+      if (!res.ok) return { granted: false, action: "deny" as const };
+      const data = await res.json();
+      const effective = (data.effective as Array<{ capability: string; granted: boolean; action: string }>) ?? [];
+      const result = effective.find((e) => e.capability === capability);
+      const final = result ? { granted: result.granted, action: result.action as "allow" | "deny" | "limit" } : { granted: false, action: "deny" as const };
+      capabilityCache.set(cacheKey, final);
+      return final;
+    } catch { return { granted: false, action: "deny" as const }; }
+  }, []);
+
+  function createKernelContext(entity: SceneEntity): KernelContext {
     return {
-      entityId,
-      entityName: entity.name,
-      getPosition: () => authStateRef.current.get(entityId)?.position ?? entity.position,
+      entityId: entity.id, entityName: entity.name,
+      getPosition: () => authStateRef.current.get(entity.id)?.position ?? entity.position,
       requestMovement: (delta) => {
-        // Send mutation to the authoritative Kernel
-        fetch(`/api/runtime/${buildIdLocal}/mutate`, {
+        if (!buildId) return;
+        fetch(`/api/runtime/${buildId}/mutate`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entityId, positionPatch: delta }),
+          body: JSON.stringify({ entityId: entity.id, positionPatch: delta }),
         }).catch(() => {});
       },
-      getState: () => authStateRef.current.get(entityId)?.state ?? entity.state,
+      getState: () => authStateRef.current.get(entity.id)?.state ?? entity.state,
       setState: (patch) => {
-        // Send mutation to the authoritative Kernel
-        fetch(`/api/runtime/${buildIdLocal}/mutate`, {
+        if (!buildId) return;
+        fetch(`/api/runtime/${buildId}/mutate`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entityId, statePatch: patch }),
+          body: JSON.stringify({ entityId: entity.id, statePatch: patch }),
         }).catch(() => {});
       },
-      emit: (event, payload) => {
-        (eventHandlersRef.current.get(event) ?? []).forEach((h) => h(payload));
-      },
+      emit: (event, payload) => { (eventHandlersRef.current.get(event) ?? []).forEach((h) => h(payload)); },
       on: (event, handler) => {
         if (!eventHandlersRef.current.has(event)) eventHandlersRef.current.set(event, []);
         eventHandlersRef.current.get(event)!.push(handler);
       },
       invokeCapability: async (capability) => {
-        const s = sceneRef.current;
-        if (!s) return { granted: false, action: "deny" as const };
-        try {
-          const res = await fetch("/api/capabilities/negotiate", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ packageId: entity.package?.name, worldProjectId: s.world.id }),
-          });
-          if (!res.ok) return { granted: false, action: "deny" as const };
-          const data = await res.json();
-          const effective = (data.effective as Array<{ capability: string; granted: boolean; action: string }>) ?? [];
-          const result = effective.find((e) => e.capability === capability);
-          return result
-            ? { granted: result.granted, action: result.action as "allow" | "deny" | "limit" }
-            : { granted: false, action: "deny" as const };
-        } catch { return { granted: false, action: "deny" as const }; }
+        const result = await invokeCapabilityReal(entity.id, capability);
+        return result;
       },
       requestService: async () => ({ ok: true }),
-      log: () => { /* could send to server */ },
+      log: () => {},
     };
-  }, [buildId]);
+  }
 
-  // Initialize package instances — the GENERIC execution path.
-  //
-  // The browser runtime is GENERIC. It does not know what an avatar,
-  // building, vehicle, or player is. Every entity gets its behavior
-  // from a PackageInstance loaded from a declarative artifact.
-  //
-  // There is ONE resolution path for ALL entities:
-  //   1. Check if the entity has a declarativeArtifact
-  //      - For scene entities: from the Scene API (entity.declarativeArtifact)
-  //      - For SSE entities (player avatars): from the SSE state (auth.state.declarativeArtifact)
-  //   2. If it has one: validate + create a DeclarativePackageInstance — the EXACT artifact
-  //   3. If it doesn't: check dev bootstrap (conformance tests only, non-strict mode)
-  //   4. If nothing: the entity is invisible (strict mode — no fallbacks)
-  //
-  // The browser NEVER synthesizes artifacts. The server provides the
-  // declarativeArtifact for player avatars via the SSE stream.
+  // Initialize package instances
   useEffect(() => {
     if (!scene) return;
-
-    // ── Scene entities (from the DB via Scene API) ──
     for (const entity of scene.entities) {
-      if (!entity.package) continue;
-      if (packageInstancesRef.current.has(entity.id)) continue;
-
+      if (!entity.package || packageInstancesRef.current.has(entity.id)) continue;
       let impl: PackageImplementation | null = null;
-
-      // 1. EXACT ARTIFACT from the Scene API
       if (entity.declarativeArtifact) {
-        const validation = validateDeclarativeArtifact(entity.declarativeArtifact);
-        if (validation.valid && validation.artifact) {
-          impl = createDeclarativeImplementation(validation.artifact);
-        }
+        const v = validateDeclarativeArtifact(entity.declarativeArtifact);
+        if (v.valid && v.artifact) impl = createDeclarativeImplementation(v.artifact);
       }
-
-      // 2. Dev bootstrap (conformance test packages only, non-strict mode)
-      if (!impl) {
-        impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
-      }
-
+      if (!impl) impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
       if (impl) {
         const ctx = createKernelContext(entity);
-        const instance = impl.createInstance();
-        instance.initialize(ctx, {
-          name: entity.package.name, displayName: entity.package.displayName,
-          family: entity.package.family, version: "1.0.0", specification: {},
-          capabilities: impl.capabilities, provides: [], requires: [],
-        });
-        instance.mount();
-        packageInstancesRef.current.set(entity.id, instance);
+        const inst = impl.createInstance();
+        inst.initialize(ctx, { name: entity.package.name, displayName: entity.package.displayName, family: entity.package.family, version: "1.0.0", specification: {}, capabilities: impl.capabilities, provides: [], requires: [] });
+        inst.mount();
+        packageInstancesRef.current.set(entity.id, inst);
       }
     }
-
-    // ── SSE entities (player avatars from the authoritative state stream) ──
-    // These entities are NOT in the scene's DB — they're spawned dynamically
-    // by createSession on the server. The server includes a declarativeArtifact
-    // in the entity's state, so the browser loads and executes it through the
-    // SAME path as scene entities. The browser does NOT synthesize anything.
-    const sceneEntityIds = new Set(scene.entities.map((e) => e.id));
+    // SSE entities
+    const sceneIds = new Set(scene.entities.map((e) => e.id));
     for (const [entityId, auth] of authStateRef.current.entries()) {
-      if (sceneEntityIds.has(entityId)) continue;
-      if (packageInstancesRef.current.has(entityId)) continue;
-
-      // The server provides the declarativeArtifact in the entity's state.
-      // The browser just loads it — no synthesis, no domain knowledge.
-      const artifactText = (auth.state.declarativeArtifact as string) ?? null;
-      if (!artifactText) continue;
-
-      const validation = validateDeclarativeArtifact(artifactText);
-      if (!validation.valid || !validation.artifact) continue;
-
-      const impl = createDeclarativeImplementation(validation.artifact);
-      // Use the SAME createKernelContext path as scene entities — no
-      // special player KernelContext. Capability requests go through
-      // the real Kernel negotiation endpoint.
-      const entityLike: SceneEntity = {
-        id: entityId,
-        name: (auth.state.name as string) ?? "Entity",
-        package: { name: validation.artifact.name, family: validation.artifact.family, displayName: validation.artifact.displayName },
-        position: auth.position,
-        components: [],
-        state: auth.state,
-        artifact: null,
-        declarativeArtifact: artifactText,
-      };
+      if (sceneIds.has(entityId) || packageInstancesRef.current.has(entityId)) continue;
+      const da = (auth.state.declarativeArtifact as string) ?? null;
+      if (!da) continue;
+      const v = validateDeclarativeArtifact(da);
+      if (!v.valid || !v.artifact) continue;
+      const impl = createDeclarativeImplementation(v.artifact);
+      const entityLike: SceneEntity = { id: entityId, name: (auth.state.name as string) ?? "Entity", package: { name: v.artifact.name, family: v.artifact.family, displayName: v.artifact.displayName }, position: auth.position, components: [], state: auth.state, artifact: null, declarativeArtifact: da };
       const ctx = createKernelContext(entityLike);
-      const instance = impl.createInstance();
-      instance.initialize(ctx, {
-        name: validation.artifact.name, displayName: validation.artifact.displayName,
-        family: validation.artifact.family, version: "1.0.0", specification: {},
-        capabilities: impl.capabilities, provides: [], requires: [],
-      });
-      instance.mount();
-      packageInstancesRef.current.set(entityId, instance);
+      const inst = impl.createInstance();
+      inst.initialize(ctx, { name: v.artifact.name, displayName: v.artifact.displayName, family: v.artifact.family, version: "1.0.0", specification: {}, capabilities: impl.capabilities, provides: [], requires: [] });
+      inst.mount();
+      packageInstancesRef.current.set(entityId, inst);
     }
-  }, [scene, createKernelContext, buildId]);
+  }, [scene, createKernelContext, buildId, invokeCapabilityReal]);
 
-  // ── Phase F: WASD/arrow key movement ──────────────────────────────
-  // The player moves their avatar. Movement goes through the Kernel
-  // (move-player endpoint), which updates authoritative state and
-  // replicates to all clients. Other players see you move in real-time.
+  // WASD movement (3D: X/Z plane)
   useEffect(() => {
     if (!buildId || !sessionId) return;
-    const keys: Record<string, boolean> = {};
-    let lastMove = 0;
-
     function onKeyDown(e: KeyboardEvent) {
-      // Only handle WASD + arrows when the canvas is focused or always
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      keys[e.key.toLowerCase()] = true;
+      keysRef.current[e.key.toLowerCase()] = true;
     }
-    function onKeyUp(e: KeyboardEvent) {
-      keys[e.key.toLowerCase()] = false;
-    }
-
-    // Movement loop — send movement requests at most every 50ms
+    function onKeyUp(e: KeyboardEvent) { keysRef.current[e.key.toLowerCase()] = false; }
     const moveInterval = setInterval(() => {
-      const now = Date.now();
-      if (now - lastMove < 50) return;
-      let dx = 0, dz = 0;
-      const speed = 2;
-      if (keys["w"] || keys["arrowup"]) dz -= speed;
-      if (keys["s"] || keys["arrowdown"]) dz += speed;
-      if (keys["a"] || keys["arrowleft"]) dx -= speed;
-      if (keys["d"] || keys["arrowright"]) dx += speed;
-      if (dx === 0 && dz === 0) return;
-      lastMove = now;
+      const keys = keysRef.current;
+      let dx = 0, dz = 0, dy = 0;
+      const speed = 1.5;
+      if (keys["w"]) dz -= speed;
+      if (keys["s"]) dz += speed;
+      if (keys["a"]) dx -= speed;
+      if (keys["d"]) dx += speed;
+      if (keys[" "]) dy += speed; // space = up
+      if (keys["shift"]) dy -= speed; // shift = down
+      if (dx === 0 && dz === 0 && dy === 0) return;
       fetch(`/api/runtime/${buildId}/move-player`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, deltaX: dx, deltaZ: dz }),
       }).catch(() => {});
     }, 50);
-
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      clearInterval(moveInterval);
-    };
+    return () => { window.removeEventListener("keydown", onKeyDown); window.removeEventListener("keyup", onKeyUp); clearInterval(moveInterval); };
   }, [buildId, sessionId]);
 
-  // ── Auto-tick: trigger the server-side scheduler every 2s ─────────
-  // In a full system, the Kernel would tick on its own. For the MVP,
-  // any client can request a tick. The Kernel is still the authority.
+  // Auto-tick
   useEffect(() => {
     if (!buildId || !connected) return;
     const interval = setInterval(() => {
-      fetch(`/api/runtime/${buildId}/tick`, { method: "POST" })
-        .then(r => r.json())
-        .then(data => setTickCount(c => c + 1))
-        .catch(() => {});
+      fetch(`/api/runtime/${buildId}/tick`, { method: "POST" }).then(r => r.json()).then(() => setTickCount(c => c + 1)).catch(() => {});
     }, 2000);
     return () => clearInterval(interval);
   }, [buildId, connected]);
 
-  // Render loop (canvas)
+  // ── 3D Render loop (Three.js) ────────────────────────────────────
   useEffect(() => {
-    if (renderer !== "canvas") return;
-    const canvas = canvasRef.current;
-    if (!canvas || !scene) return;
-    const ctx2d = canvas.getContext("2d");
-    if (!ctx2d) return;
+    if (renderer !== "3d" || !scene || !mountRef.current) return;
 
+    // Setup Three.js
+    const mount = mountRef.current;
+    const w = mount.clientWidth;
+    const h = mount.clientHeight;
+
+    const threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color(0x0a0a0b);
+    threeScene.fog = new THREE.Fog(0x0a0a0b, 50, 200);
+    threeSceneRef.current = threeScene;
+
+    const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 500);
+    threeCameraRef.current = camera;
+
+    const renderer3d = new THREE.WebGLRenderer({ antialias: true });
+    renderer3d.setSize(w, h);
+    renderer3d.setPixelRatio(window.devicePixelRatio);
+    mount.appendChild(renderer3d.domElement);
+    threeRendererRef.current = renderer3d;
+
+    // Lighting
+    const ambient = new THREE.AmbientLight(0x404060, 1.5);
+    threeScene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+    dirLight.position.set(20, 30, 20);
+    threeScene.add(dirLight);
+    const hemiLight = new THREE.HemisphereLight(0x4488ff, 0x080820, 0.5);
+    threeScene.add(hemiLight);
+
+    // Grid floor
+    const grid = new THREE.GridHelper(200, 40, 0x4eeab8, 0x1a2a3a);
+    grid.position.y = -0.1;
+    threeScene.add(grid);
+
+    // Ground plane
+    const groundGeo = new THREE.PlaneGeometry(200, 200);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x0d1117, roughness: 0.9, metalness: 0.1 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.2;
+    threeScene.add(ground);
+
+    // Spatial anchors as markers
+    for (const a of scene.anchors) {
+      const anchorGeo = new THREE.RingGeometry(1, 1.5, 16);
+      const anchorMat = new THREE.MeshBasicMaterial({ color: 0x4eeab8, side: THREE.DoubleSide, transparent: true, opacity: 0.4 });
+      const anchorMesh = new THREE.Mesh(anchorGeo, anchorMat);
+      anchorMesh.position.set(a.global.x, 0, a.global.z);
+      anchorMesh.rotation.x = -Math.PI / 2;
+      threeScene.add(anchorMesh);
+    }
+
+    // Mouse controls
+    let mouseDown = false;
+    let lastMouse = { x: 0, y: 0 };
+    function onMouseDown(e: MouseEvent) { mouseDown = true; lastMouse = { x: e.clientX, y: e.clientY }; }
+    function onMouseUp() { mouseDown = false; }
+    function onMouseMove(e: MouseEvent) {
+      if (!mouseDown) return;
+      const dx = e.clientX - lastMouse.x;
+      const dy = e.clientY - lastMouse.y;
+      cameraAngleRef.current.theta -= dx * 0.01;
+      cameraAngleRef.current.phi = Math.max(0.1, Math.min(Math.PI / 2 - 0.1, cameraAngleRef.current.phi - dy * 0.01));
+      lastMouse = { x: e.clientX, y: e.clientY };
+    }
+    function onWheel(e: WheelEvent) {
+      cameraAngleRef.current.distance = Math.max(10, Math.min(100, cameraAngleRef.current.distance + e.deltaY * 0.05));
+    }
+    mount.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("mousemove", onMouseMove);
+    mount.addEventListener("wheel", onWheel);
+
+    // Render loop
     let running = true;
     const loop = () => {
       if (!running) return;
       const s = sceneRef.current;
-      if (!s) { requestAnimationFrame(loop); return; }
-      const W = canvas.width, H = canvas.height;
-
-      ctx2d.fillStyle = "#0a0a0b"; ctx2d.fillRect(0, 0, W, H);
-      ctx2d.strokeStyle = "rgba(255,255,255,0.04)"; ctx2d.lineWidth = 1;
-      for (let x = (W / 2) % 40; x < W; x += 40) { ctx2d.beginPath(); ctx2d.moveTo(x, 0); ctx2d.lineTo(x, H); ctx2d.stroke(); }
-      for (let y = (H / 2) % 40; y < H; y += 40) { ctx2d.beginPath(); ctx2d.moveTo(0, y); ctx2d.lineTo(W, y); ctx2d.stroke(); }
-
-      const scale = 4;
-
-      // ── Phase D: Draw spatial cell grid (streaming visualization) ──
-      const CELL_SIZE = 50; // must match server
-      const cellPx = CELL_SIZE * scale;
-      ctx2d.strokeStyle = "rgba(78, 222, 184, 0.08)";
-      ctx2d.lineWidth = 1;
-      for (let cx = (W / 2) % cellPx; cx < W; cx += cellPx) {
-        ctx2d.beginPath(); ctx2d.moveTo(cx, 0); ctx2d.lineTo(cx, H); ctx2d.stroke();
-      }
-      for (let cy = (H / 2) % cellPx; cy < H; cy += cellPx) {
-        ctx2d.beginPath(); ctx2d.moveTo(0, cy); ctx2d.lineTo(W, cy); ctx2d.stroke();
-      }
-
-      // Draw active cells (cells that contain entities) — highlighted
-      for (const entity of s.entities) {
-        const auth = authStateRef.current.get(entity.id);
-        const pos = auth?.position ?? entity.position;
-        const cellCx = Math.floor(pos.x / CELL_SIZE);
-        const cellCz = Math.floor(pos.z / CELL_SIZE);
-        const px = W / 2 + cellCx * cellPx;
-        const py = H / 2 + cellCz * cellPx;
-        ctx2d.fillStyle = "rgba(78, 222, 184, 0.04)";
-        ctx2d.fillRect(px, py, cellPx, cellPx);
-      }
-
-      // Draw interest radius (the player's streaming region)
-      if (sessionId) {
-        const playerSession = sessions.find((s2) => s2.sessionId === sessionId);
-        if (playerSession) {
-          // Center the interest region on the world origin for now
-          // (in a full system, this would follow the player's avatar)
-          const interestRadius = 100 * scale; // 100 world units
-          ctx2d.strokeStyle = "rgba(125, 211, 252, 0.3)";
-          ctx2d.lineWidth = 1.5;
-          ctx2d.setLineDash([4, 4]);
-          ctx2d.beginPath();
-          ctx2d.arc(W / 2, H / 2, interestRadius, 0, Math.PI * 2);
-          ctx2d.stroke();
-          ctx2d.setLineDash([]);
-          ctx2d.fillStyle = "rgba(125, 211, 252, 0.4)";
-          ctx2d.font = "9px monospace";
-          ctx2d.fillText("interest region (streaming)", W / 2 + interestRadius + 4, H / 2);
+      if (s) {
+        // Clear old entity groups
+        for (const [, group] of entityGroupsRef.current) {
+          threeScene.remove(group);
         }
-      }
+        entityGroupsRef.current.clear();
 
-      // Update package instances from authoritative state
-      for (const [, inst] of packageInstancesRef.current) inst.update(16);
+        // Update + render all entities
+        const allEntities = [
+          ...s.entities.map((e) => ({ id: e.id, position: authStateRef.current.get(e.id)?.position ?? e.position })),
+          ...Array.from(authStateRef.current.entries())
+            .filter(([id]) => !s.entities.some((e) => e.id === id))
+            .map(([id, auth]) => ({ id, position: auth.position })),
+        ];
 
-      // Anchors
-      for (const a of s.anchors) {
-        const cx = W / 2 + a.global.x * scale, cy = H / 2 + a.global.z * scale;
-        if (cx < 0 || cx > W || cy < 0 || cy > H) continue;
-        ctx2d.strokeStyle = "rgba(78, 222, 184, 0.3)";
-        ctx2d.beginPath(); ctx2d.arc(cx, cy, 8, 0, Math.PI * 2); ctx2d.stroke();
-        ctx2d.fillStyle = "rgba(78, 222, 184, 0.6)"; ctx2d.font = "9px monospace";
-        ctx2d.fillText(a.semanticId.split(".").pop() ?? a.semanticId, cx + 10, cy - 6);
-      }
+        for (const entity of allEntities) {
+          const inst = packageInstancesRef.current.get(entity.id);
+          if (!inst) continue;
 
-      // ── Render ALL entities through the Package Executor ──
-      // The browser runtime knows NOTHING about families, avatars, buildings,
-      // or player types. It just:
-      //   1. Iterates all entities (from the scene + player avatars from SSE)
-      //   2. Finds their PackageInstance (loaded from the declarative artifact)
-      //   3. Calls instance.render(rc) — the package draws itself
-      //
-      // No family conditionals. No fallback circles. No player-specific rendering.
-      // If a package has no instance, it doesn't render (strict mode).
+          // Update
+          inst.update(16);
 
-      // Collect ALL renderable entities: scene entities + player avatars from SSE
-      const sceneEntityIds = new Set(s.entities.map((e) => e.id));
-      const allRenderable: Array<{
-        id: string;
-        name: string;
-        position: { x: number; y: number; z: number };
-      }> = [
-        // Scene entities (from DB)
-        ...s.entities.map((e) => ({
-          id: e.id,
-          name: e.name,
-          position: authStateRef.current.get(e.id)?.position ?? e.position,
-        })),
-        // Player avatars (from SSE authoritative state, not in scene DB)
-        ...Array.from(authStateRef.current.entries())
-          .filter(([id]) => !sceneEntityIds.has(id))
-          .map(([id, auth]) => ({
-            id,
-            name: (auth.state.name as string) ?? "Player",
-            position: auth.position,
-          })),
-      ];
-
-      for (const entity of allRenderable) {
-        const cx = W / 2 + entity.position.x * scale;
-        const cy = H / 2 + entity.position.z * scale;
-        if (cx < 0 || cx > W || cy < 0 || cy > H) continue;
-
-        const inst = packageInstancesRef.current.get(entity.id);
-        const isSelected = selectedEntity === entity.id;
-
-        if (inst) {
-          // The package renders ITSELF through the RenderContext.
-          // The browser has no idea what shape/color/behavior it will draw.
-          const rc = new CanvasRenderContext(ctx2d, cx, cy, entity.position.x, entity.position.y, entity.position.z, scale, isSelected);
+          // Render via ThreeRenderContext
+          const rc = new ThreeRenderContext(threeScene, entity.position.x, entity.position.y, entity.position.z, entityGroupsRef.current, entity.id);
+          rc.selected = selectedEntity === entity.id;
           inst.render(rc);
+          const group = rc.commit();
+          group.position.set(entity.position.x, entity.position.y, entity.position.z);
+          threeScene.add(group);
+          entityGroupsRef.current.set(entity.id, group);
         }
-        // If no instance: in strict mode, the entity is invisible.
-        // The browser does NOT draw a fallback shape — that would be
-        // family-based rendering pretending to be generic execution.
+
+        // Camera orbit
+        const cam = cameraAngleRef.current;
+        camera.position.x = Math.sin(cam.theta) * Math.cos(cam.phi) * cam.distance;
+        camera.position.y = Math.sin(cam.phi) * cam.distance;
+        camera.position.z = Math.cos(cam.theta) * Math.cos(cam.phi) * cam.distance;
+        camera.lookAt(0, 0, 0);
       }
 
-      // HUD
-      ctx2d.fillStyle = "rgba(255,255,255,0.5)"; ctx2d.font = "10px monospace";
-      ctx2d.fillText(`PlayLiquid Web Runtime · protocol v${s.runtime.protocolVersion}`, 8, 14);
-      ctx2d.fillText(`${s.entities.length} entities · ${packageInstancesRef.current.size} instances · authoritative state`, 8, 28);
-      ctx2d.fillText(`${connected ? "● connected" : "○ disconnected"} · ${sessions.length} players · tick #${tickCount} · streaming: spatial cells`, 8, 42);
-      if (sessionId) {
-        ctx2d.fillStyle = "rgba(125, 211, 252, 0.6)";
-        ctx2d.fillText(`WASD / arrows to move your avatar`, 8, 56);
-      }
-
-      requestAnimationFrame(loop);
+      renderer3d.render(threeScene, camera);
+      animationRef.current = requestAnimationFrame(loop);
     };
     loop();
-    return () => { running = false; };
-  }, [scene, selectedEntity, renderer, connected, sessions.length, tickCount]);
+
+    // Resize handler
+    function onResize() {
+      if (!mount || !renderer3d || !camera) return;
+      const w = mount.clientWidth, h = mount.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer3d.setSize(w, h);
+    }
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(animationRef.current);
+      mount.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("mousemove", onMouseMove);
+      mount.removeEventListener("wheel", onWheel);
+      window.removeEventListener("resize", onResize);
+      if (mount.contains(renderer3d.domElement)) mount.removeChild(renderer3d.domElement);
+      renderer3d.dispose();
+    };
+  }, [scene, renderer, selectedEntity]);
 
   // Text renderer
   useEffect(() => {
@@ -561,128 +524,74 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       const s = sceneRef.current;
       if (!s) return;
       const lines: string[] = [];
-      lines.push("═══ PlayLiquid Text Runtime (adapter #2) ═══");
+      lines.push("═══ PlayLiquid Text Runtime (3D adapter) ═══");
       lines.push(`World: ${s.world.name} v${s.world.buildVersion}`);
       lines.push(`${connected ? "● connected" : "○ disconnected"} · ${sessions.length} players · tick #${tickCount}`);
-      lines.push(`Entities: ${s.entities.length} · Instances: ${packageInstancesRef.current.size}`);
       lines.push("");
       for (const entity of s.entities) {
         const auth = authStateRef.current.get(entity.id);
         const pos = auth?.position ?? entity.position;
-        const state = auth?.state ?? entity.state;
-        const stateKeys = Object.keys(state).slice(0, 4).map((k) => `${k}=${JSON.stringify(state[k])?.slice(0, 20)}`).join(", ");
         lines.push(`[${entity.id.slice(0, 8)}] ${entity.name} (${entity.package?.family ?? "?"})`);
-        lines.push(`  pos: (${pos.x.toFixed(1)}, ${pos.z.toFixed(1)})  state: ${stateKeys}`);
-      }
-      lines.push("");
-      lines.push("── Sessions (live multiplayer) ──");
-      for (const sess of sessions) {
-        lines.push(`  ${sess.sessionId.slice(0, 12)} ${sess.name} (connected ${new Date(sess.connectedAt).toLocaleTimeString()})`);
+        lines.push(`  3D pos: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})`);
       }
       setTextOutput(lines.join("\n"));
     }, 500);
     return () => clearInterval(interval);
   }, [scene, renderer, connected, sessions, tickCount]);
 
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !scene) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    const scale = 4;
-    let closest: string | null = null, minDist = 20;
-    for (const ent of scene.entities) {
-      const auth = authStateRef.current.get(ent.id);
-      const pos = auth?.position ?? ent.position;
-      const cx = canvas.width / 2 + pos.x * scale, cy = canvas.height / 2 + pos.z * scale;
-      const dist = Math.hypot(cx - x, cy - y);
-      if (dist < minDist) { minDist = dist; closest = ent.id; }
-    }
-    setSelectedEntity(closest);
-    if (closest) {
-      (eventHandlersRef.current.get("entity.click") ?? []).forEach((h) => h({ entityId: closest }));
-    }
-  }, [scene]);
-
   if (!buildId) return <div className="flex h-64 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">Select a World Build to run.</div>;
   if (error) return <div className="flex h-64 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-500/[0.04] text-sm text-rose-300">Runtime error: {error}</div>;
   if (!scene) return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">Loading world scene…</div>;
 
-  const selectedEnt = scene.entities.find((e) => e.id === selectedEntity);
   const loadedCount = packageInstancesRef.current.size;
-  const authState = selectedEnt ? authStateRef.current.get(selectedEnt.id) : null;
 
   return (
     <div className="space-y-3">
-      {/* Header with multiplayer status */}
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
-          <Monitor className="mr-1 h-3 w-3" />PlayLiquid Web Runtime
-        </Badge>
-        <Badge variant="outline" className={`font-mono text-[9px] ${connected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"}`}>
-          <Wifi className="mr-1 h-2.5 w-2.5" />{connected ? "connected" : "disconnected"}
-        </Badge>
-        <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 font-mono text-[9px] text-sky-300">
-          <Users className="mr-1 h-2.5 w-2.5" />{sessions.length} player{sessions.length === 1 ? "" : "s"}
-        </Badge>
-        <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 font-mono text-[9px] text-amber-300">
-          <Cpu className="mr-1 h-2.5 w-2.5" />{loadedCount} instances
-        </Badge>
-        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] text-emerald-300">
-          <Zap className="mr-1 h-2.5 w-2.5" />tick #{tickCount}
-        </Badge>
+        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300"><Monitor className="mr-1 h-3 w-3" />PlayLiquid 3D Runtime</Badge>
+        <Badge variant="outline" className={`font-mono text-[9px] ${connected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"}`}><Wifi className="mr-1 h-2.5 w-2.5" />{connected ? "connected" : "disconnected"}</Badge>
+        <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 font-mono text-[9px] text-sky-300"><Users className="mr-1 h-2.5 w-2.5" />{sessions.length} player{sessions.length === 1 ? "" : "s"}</Badge>
+        <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 font-mono text-[9px] text-amber-300"><Cpu className="mr-1 h-2.5 w-2.5" />{loadedCount} instances</Badge>
+        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] text-emerald-300"><Zap className="mr-1 h-2.5 w-2.5" />tick #{tickCount}</Badge>
         <span className="ml-auto text-xs text-muted-foreground">{scene.world.name} · v{scene.world.buildVersion}</span>
-        <Select value={renderer} onValueChange={(v) => setRenderer(v as "canvas" | "text")}>
+        <Select value={renderer} onValueChange={(v) => setRenderer(v as "3d" | "text")}>
           <SelectTrigger className="h-7 w-[120px] text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="canvas">Canvas adapter</SelectItem>
+            <SelectItem value="3d">3D (Three.js)</SelectItem>
             <SelectItem value="text">Text adapter</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      {/* Multiplayer banner */}
       {connected && sessions.length > 1 && (
         <Card className="border-sky-500/20 bg-sky-500/[0.03]">
           <CardContent className="p-3">
             <div className="flex items-center gap-2 text-xs">
               <Users className="h-4 w-4 text-sky-400" />
               <span className="font-medium text-sky-300">Multiplayer active</span>
-              <span className="text-muted-foreground">— {sessions.length} players connected. State is authoritative and replicated. Open this page in another tab to see real-time sync.</span>
+              <span className="text-muted-foreground">— {sessions.length} players connected. WASD to move, mouse to orbit, scroll to zoom.</span>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {renderer === "canvas" ? (
-        <div className="grid gap-3 lg:grid-cols-[1fr_300px]">
+      {renderer === "3d" ? (
+        <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
           <Card className="overflow-hidden border-border bg-card/40">
-            <canvas ref={canvasRef} width={640} height={400} onClick={handleCanvasClick} className="w-full cursor-crosshair" style={{ aspectRatio: "16/10" }} />
+            <div ref={mountRef} className="w-full" style={{ height: "450px", cursor: "grab" }} />
           </Card>
           <div className="space-y-3">
             <Card className="border-border bg-card/40">
-              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Crosshair className="h-3.5 w-3.5 text-primary" />Entity (Authoritative)</CardTitle></CardHeader>
-              <CardContent className="space-y-2">
-                {selectedEnt ? (
-                  <>
-                    <div><p className="text-sm font-medium">{selectedEnt.name}</p><p className="font-mono text-[10px] text-muted-foreground">{selectedEnt.package?.name ?? "none"}</p></div>
-                    <div className="grid grid-cols-3 gap-1 text-[10px]">
-                      <div className="rounded border border-border/50 bg-muted/30 p-1"><span className="text-muted-foreground">X</span><p className="font-mono text-foreground/80">{(authState?.position.x ?? selectedEnt.position.x).toFixed(1)}</p></div>
-                      <div className="rounded border border-border/50 bg-muted/30 p-1"><span className="text-muted-foreground">Y</span><p className="font-mono text-foreground/80">{(authState?.position.y ?? selectedEnt.position.y).toFixed(1)}</p></div>
-                      <div className="rounded border border-border/50 bg-muted/30 p-1"><span className="text-muted-foreground">Z</span><p className="font-mono text-foreground/80">{(authState?.position.z ?? selectedEnt.position.z).toFixed(1)}</p></div>
-                    </div>
-                    <div><p className="mb-1 text-[10px] uppercase text-muted-foreground">State (Kernel-authoritative)</p><pre className="max-h-24 overflow-auto rounded border border-border/50 bg-background/60 p-1.5 font-mono text-[9px] scroll-thin">{JSON.stringify(authState?.state ?? selectedEnt.state, null, 2)}</pre></div>
-                  </>
-                ) : <p className="py-4 text-center text-[11px] text-muted-foreground">Click an entity</p>}
-              </CardContent>
+              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Users className="h-3.5 w-3.5 text-sky-400" />Players</CardTitle></CardHeader>
+              <CardContent><div className="space-y-1">{sessions.length === 0 ? <p className="text-[11px] text-muted-foreground">No players</p> : sessions.map((s) => (<div key={s.sessionId} className="flex items-center gap-2 text-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /><span className="font-mono text-foreground/70">{s.name}</span></div>))}</div></CardContent>
             </Card>
             <Card className="border-border bg-card/40">
-              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Users className="h-3.5 w-3.5 text-sky-400" />Connected Players</CardTitle></CardHeader>
-              <CardContent><div className="space-y-1">{sessions.length === 0 ? <p className="text-[11px] text-muted-foreground">No players</p> : sessions.map((s) => (<div key={s.sessionId} className="flex items-center gap-2 text-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" /><span className="font-mono text-foreground/70">{s.name}</span><span className="ml-auto text-muted-foreground/50">{new Date(s.connectedAt).toLocaleTimeString()}</span></div>))}</div></CardContent>
+              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Anchor className="h-3.5 w-3.5 text-primary" />Spatial Anchors</CardTitle></CardHeader>
+              <CardContent><div className="max-h-32 space-y-0.5 overflow-y-auto scroll-thin">{scene.anchors.slice(0, 8).map((a) => (<div key={a.id} className="flex items-center gap-1.5 text-[10px]"><span className="font-mono text-emerald-300/70">{a.semanticId.split(".").pop()}</span><span className="ml-auto font-mono text-muted-foreground/60">({a.global.x.toFixed(0)}, {a.global.z.toFixed(0)})</span></div>))}</div></CardContent>
             </Card>
             <Card className="border-border bg-card/40">
-              <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Anchor className="h-3.5 w-3.5 text-primary" />Anchors</CardTitle></CardHeader>
-              <CardContent><div className="max-h-24 space-y-0.5 overflow-y-auto scroll-thin">{scene.anchors.slice(0, 8).map((a) => (<div key={a.id} className="flex items-center gap-1.5 text-[10px]"><span className="font-mono text-emerald-300/70">{a.semanticId.split(".").pop()}</span><span className="ml-auto font-mono text-muted-foreground/60">({a.global.x.toFixed(0)}, {a.global.z.toFixed(0)})</span></div>))}</div></CardContent>
+              <CardHeader className="pb-2"><CardTitle className="text-xs">Controls</CardTitle></CardHeader>
+              <CardContent><div className="space-y-1 text-[10px] text-muted-foreground"><p><kbd className="rounded bg-muted px-1">WASD</kbd> Move on ground plane</p><p><kbd className="rounded bg-muted px-1">Space/Shift</kbd> Up/Down</p><p><kbd className="rounded bg-muted px-1">Mouse drag</kbd> Orbit camera</p><p><kbd className="rounded bg-muted px-1">Scroll</kbd> Zoom</p></div></CardContent>
             </Card>
           </div>
         </div>
@@ -693,16 +602,14 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
         </Card>
       )}
 
-      {/* Protocol */}
       <Card className="border-border bg-card/40">
-        <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Radio className="h-3.5 w-3.5 text-primary" />PlayLiquid Protocol — Authoritative State</CardTitle></CardHeader>
+        <CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-xs"><Radio className="h-3.5 w-3.5 text-primary" />PlayLiquid Protocol — 3D</CardTitle></CardHeader>
         <CardContent><div className="flex flex-wrap gap-1.5">
           <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] text-emerald-300"><Box className="mr-1 h-2.5 w-2.5" />{scene.entities.length} entities</Badge>
           <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] text-emerald-300"><Anchor className="mr-1 h-2.5 w-2.5" />{scene.anchors.length} anchors</Badge>
           <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 font-mono text-[9px] text-sky-300"><Wifi className="mr-1 h-2.5 w-2.5" />SSE stream</Badge>
-          <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 font-mono text-[9px] text-sky-300"><Users className="mr-1 h-2.5 w-2.5" />{sessions.length} players</Badge>
           <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] text-emerald-300"><ShieldCheck className="mr-1 h-2.5 w-2.5" />Kernel authority</Badge>
-          <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 font-mono text-[9px] text-amber-300"><Zap className="mr-1 h-2.5 w-2.5" />tick #{tickCount}</Badge>
+          <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 font-mono text-[9px] text-violet-300">Three.js 3D adapter</Badge>
         </div></CardContent>
       </Card>
     </div>

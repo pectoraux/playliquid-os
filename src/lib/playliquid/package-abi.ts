@@ -52,20 +52,20 @@ export interface KernelContext {
 }
 
 // ── The engine-agnostic RenderContext ─────────────────────────────
-// Phase A fix: NO canvas-specific types. The package issues draw
-// commands; the adapter (canvas, WebGL, Unity, Unreal) translates them.
-// The package never knows what a Canvas is.
+// Supports both 2D and 3D draw commands. The package issues draw
+// commands; the adapter (canvas-2d, Three.js/WebGL, Unity, Unreal)
+// translates them. The package never knows what engine renders it.
 export interface RenderContext {
-  // The entity's position in the render surface (pre-computed by adapter)
-  screenX: number;
-  screenY: number;
+  // The entity's position in world space (3D)
   worldX: number;
   worldY: number;
   worldZ: number;
   scale: number;
   selected: boolean;
 
-  // ── Draw commands (engine-agnostic) ──
+  // ── 2D draw commands (for canvas-2d adapters) ──
+  screenX: number;
+  screenY: number;
   drawRect(x: number, y: number, w: number, h: number, opts: DrawOpts): void;
   drawCircle(x: number, y: number, r: number, opts: DrawOpts): void;
   drawLine(x1: number, y1: number, x2: number, y2: number, opts: DrawOpts): void;
@@ -73,6 +73,26 @@ export interface RenderContext {
   drawPath(points: Array<{ x: number; y: number }>, opts: DrawOpts): void;
   pushTransform(x: number, y: number, rotation: number, scale: number): void;
   popTransform(): void;
+
+  // ── 3D draw commands (for Three.js/WebGL/Unity adapters) ──
+  drawBox?(w: number, h: number, d: number, opts: DrawOpts3D): void;
+  drawSphere?(r: number, opts: DrawOpts3D): void;
+  drawCylinder?(rt: number, rb: number, h: number, opts: DrawOpts3D): void;
+  drawCone?(r: number, h: number, opts: DrawOpts3D): void;
+  drawMesh?(vertices: number[], indices: number[], opts: DrawOpts3D): void;
+  setPosition?(x: number, y: number, z: number): void;
+  setRotation?(x: number, y: number, z: number): void;
+  setScale?(s: number): void;
+  drawText3D?(x: number, y: number, z: number, text: string, opts: TextOpts): void;
+}
+
+export interface DrawOpts3D {
+  color: string;
+  emissive?: string;
+  metalness?: number;
+  roughness?: number;
+  opacity?: number;
+  wireframe?: boolean;
 }
 
 export interface DrawOpts {

@@ -69,12 +69,23 @@ export interface UpdateBehavior {
 export interface RenderBehavior {
   behavior: "shape";
   params: {
-    shape: "circle" | "rect" | "diamond" | "triangle";
+    // 2D shapes (for canvas-2d adapters)
+    shape: "circle" | "rect" | "diamond" | "triangle" | "box" | "sphere" | "cylinder" | "cone";
     size: number;
     color: string;
     strokeColor?: string;
     label?: string;
     showDirection?: boolean;
+    // 3D params (used by Three.js/WebGL/Unity adapters)
+    width?: number;
+    height?: number;
+    depth?: number;
+    radius?: number;
+    emissive?: string;
+    metalness?: number;
+    roughness?: number;
+    opacity?: number;
+    wireframe?: boolean;
   };
 }
 
@@ -216,6 +227,58 @@ class DeclarativePackageInstance implements PackageInstance {
           { x: (rotation !== 0 ? 0 : rc.screenX) + renderSize, y: (rotation !== 0 ? 0 : rc.screenY) + renderSize },
           { x: (rotation !== 0 ? 0 : rc.screenX) - renderSize, y: (rotation !== 0 ? 0 : rc.screenY) + renderSize },
         ], opts);
+        break;
+      // ── 3D shapes (used by Three.js adapter; 2D adapters ignore these) ──
+      case "box":
+        if (rc.drawBox) {
+          rc.setPosition?.(rc.worldX, rc.worldY, rc.worldZ);
+          rc.setScale?.(pulseScale);
+          rc.drawBox(
+            this.artifact.render.params.width ?? renderSize * 2,
+            this.artifact.render.params.height ?? renderSize * 2,
+            this.artifact.render.params.depth ?? renderSize * 2,
+            {
+              color,
+              emissive: this.artifact.render.params.emissive,
+              metalness: this.artifact.render.params.metalness,
+              roughness: this.artifact.render.params.roughness,
+              opacity: this.artifact.render.params.opacity,
+              wireframe: this.artifact.render.params.wireframe,
+            }
+          );
+        }
+        break;
+      case "sphere":
+        if (rc.drawSphere) {
+          rc.setPosition?.(rc.worldX, rc.worldY, rc.worldZ);
+          rc.setScale?.(pulseScale);
+          rc.drawSphere(renderSize, {
+            color,
+            emissive: this.artifact.render.params.emissive,
+            metalness: this.artifact.render.params.metalness,
+            roughness: this.artifact.render.params.roughness,
+            opacity: this.artifact.render.params.opacity,
+            wireframe: this.artifact.render.params.wireframe,
+          });
+        }
+        break;
+      case "cylinder":
+        if (rc.drawCylinder) {
+          rc.setPosition?.(rc.worldX, rc.worldY, rc.worldZ);
+          rc.drawCylinder(renderSize, renderSize, this.artifact.render.params.height ?? renderSize * 2, {
+            color,
+            emissive: this.artifact.render.params.emissive,
+          });
+        }
+        break;
+      case "cone":
+        if (rc.drawCone) {
+          rc.setPosition?.(rc.worldX, rc.worldY, rc.worldZ);
+          rc.drawCone(renderSize, this.artifact.render.params.height ?? renderSize * 2, {
+            color,
+            emissive: this.artifact.render.params.emissive,
+          });
+        }
         break;
     }
 
@@ -362,8 +425,8 @@ export function validateDeclarativeArtifact(raw: unknown): ArtifactValidationRes
     }
     if (r.params) {
       const p = r.params as Record<string, unknown>;
-      if (p.shape && !["circle", "rect", "diamond", "triangle"].includes(p.shape as string)) {
-        errors.push(`Invalid render shape "${p.shape}". Valid: circle, rect, diamond, triangle`);
+      if (p.shape && !["circle", "rect", "diamond", "triangle", "box", "sphere", "cylinder", "cone"].includes(p.shape as string)) {
+        errors.push(`Invalid render shape "${p.shape}". Valid: circle, rect, diamond, triangle, box, sphere, cylinder, cone`);
       }
       if (!p.size || typeof p.size !== "number") {
         warnings.push("render.params.size should be a number — defaulting to 8");

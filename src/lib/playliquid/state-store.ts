@@ -211,7 +211,16 @@ export async function createSession(buildId: string, name: string): Promise<stri
       update: { behavior: "static", params: {} },
       render: {
         behavior: "shape",
-        params: { shape: "circle", size: 10, color, showDirection: true, label: name },
+        params: {
+          shape: "sphere",
+          size: 2,
+          color,
+          emissive: color,
+          metalness: 0.3,
+          roughness: 0.7,
+          showDirection: true,
+          label: name,
+        },
       },
       onClick: { behavior: "emit", params: { event: "player.click" } },
     });
