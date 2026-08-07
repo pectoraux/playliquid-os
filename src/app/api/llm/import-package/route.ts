@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
         family,
         version: "1.0.0",
         hash,
-        manifest: JSON.stringify({ entrypoint: "index.js", runtime: "playliquid", resources: [], config: { artifact } }),
+        manifest: JSON.stringify({ entrypoint: "declarative", runtime: "playliquid", format: "declarative-ir", resources: [], config: { artifact } }),
         specification: JSON.stringify(canonical),
         artifactUri: `user-import://${hash}`,
         provenance: JSON.stringify({
@@ -121,16 +121,18 @@ export async function POST(req: NextRequest) {
         packageId: pkg.id,
         target: "playliquid-web",
         artifactUri: `user-import://${pkg.hash}`,
-        format: "js-module",
+        format: "declarative-ir",
         status: "READY",
         metadata: JSON.stringify({
           source: "user-llm-import",
           importedAt: new Date().toISOString(),
           artifactLength: artifact.length,
-          // In a full system, this would be the executable JS module.
-          // For the MVP, the artifact text is stored and the browser
-          // runtime resolves it via the package registry.
-          entrypoint: "user-implementation.js",
+          format: "declarative-ir",
+          entrypoint: "declarative",
+          // The actual declarative artifact text is stored in the package
+          // manifest's config.artifact field. The Scene API includes it
+          // in the entity payload so the browser can load and execute
+          // the EXACT artifact — no family fallback needed.
         }),
       },
     });

@@ -29,9 +29,10 @@ import {
   Layers, Shield, ShieldCheck, Users, Wifi, Zap,
 } from "lucide-react";
 import type {
-  KernelContext, PackageInstance, RenderContext, DrawOpts, TextOpts,
+  KernelContext, PackageInstance, PackageImplementation, RenderContext, DrawOpts, TextOpts,
 } from "@/lib/playliquid/package-abi";
 import { artifactLoader } from "@/lib/playliquid/packages";
+import { validateDeclarativeArtifact, createDeclarativeImplementation } from "@/lib/playliquid/declarative-artifact";
 
 // ── Scene + state types ───────────────────────────────────────────
 interface SceneEntity {
@@ -40,6 +41,7 @@ interface SceneEntity {
   position: { x: number; y: number; z: number };
   components: string[]; state: Record<string, unknown>;
   artifact: { target: string; format: string; artifactUri: string } | null;
+  declarativeArtifact: string | null;
 }
 interface WorldScene {
   world: { id: string; name: string; slug: string; buildVersion: number; buildHash: string };
@@ -249,39 +251,44 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
     };
   }, [buildId]);
 
-  // Initialize package instances through the GENERIC loader.
-  // For packages in the dev bootstrap (conformance tests), uses the
-  // TypeScript implementation. For ALL OTHER packages (including
-  // user-LLM-imported), resolves through the declarative artifact path.
-  // If the entity has a RuntimeArtifact, tries to load it as a declarative
-  // artifact. Falls back to family default.
+  // Initialize package instances — the EXACT artifact execution path.
+  //
+  // Priority:
+  //   1. If the entity has a declarativeArtifact (from the Scene API),
+  //      validate + parse it and create a DeclarativePackageInstance.
+  //      This is the EXACT package the LLM produced — no family fallback.
+  //   2. If no declarative artifact, check the dev bootstrap (conformance
+  //      test packages only).
+  //   3. If neither, use the family fallback (declarative default).
+  //
+  // This means: delete every family fallback → imported packages STILL RUN
+  // because they have their own declarativeArtifact from the Scene API.
   useEffect(() => {
     if (!scene) return;
     for (const entity of scene.entities) {
       if (!entity.package) continue;
       if (packageInstancesRef.current.has(entity.id)) continue;
 
-      let impl = null;
+      let impl: PackageImplementation | null = null;
+      let usedExactArtifact = false;
 
-      // 1. Try the dev bootstrap (conformance test packages only)
-      impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
-
-      // 2. If the entity has a RuntimeArtifact, try to load it as a
-      //    declarative artifact (this is the generic path — works for
-      //    any user-LLM-imported package)
-      if (!impl && entity.artifact) {
-        // The artifactUri contains the package hash. In a full system,
-        // we'd fetch the artifact content from the store. For the MVP,
-        // the artifact content is in the package's manifest config.
-        // We try to resolve it as a declarative artifact.
-        // (The actual artifact text was stored in the package manifest
-        // during import. The browser can't access it directly from the
-        // Scene API, but the family fallback provides a working
-        // declarative implementation.)
+      // 1. EXACT ARTIFACT: if the entity has a declarative artifact from
+      //    the Scene API, validate + create an implementation from it.
+      //    This is the LLM's EXACT package — not a family fallback.
+      if (entity.declarativeArtifact) {
+        const validation = validateDeclarativeArtifact(entity.declarativeArtifact);
+        if (validation.valid && validation.artifact) {
+          impl = createDeclarativeImplementation(validation.artifact);
+          usedExactArtifact = true;
+        }
       }
 
-      // 3. If still no impl, the resolveByName already returned a
-      //    family fallback (declarative). So impl is never null.
+      // 2. Dev bootstrap (conformance test packages only)
+      if (!impl) {
+        impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
+      }
+
+      // 3. impl is never null (resolveByName always returns a family fallback)
 
       if (impl) {
         const ctx = createKernelContext(entity);

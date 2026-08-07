@@ -70,10 +70,15 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ buildId: s
       scale: a.scale,
     })),
     // ── Entities (protocol.entity) ──
+    // Each entity includes its package's declarative artifact text (if available)
+    // so the browser Package Executor can load and execute the EXACT artifact —
+    // no family fallback needed.
     entities: build.entities.map((e) => {
       const pos = JSON.parse(e.position);
       const state = JSON.parse(e.state);
       const components = JSON.parse(e.components);
+      const manifest = e.package ? JSON.parse(e.package.manifest) as { config?: { artifact?: string }; format?: string } : null;
+      const artifactText = manifest?.config?.artifact ?? null;
       return {
         id: e.id,
         name: e.name,
@@ -85,8 +90,12 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ buildId: s
         position: pos,
         components,
         state,
-        // The runtime artifact for this entity's package (if available)
+        // The runtime artifact for this entity's package
         artifact: e.package?.runtimeArtifacts?.find((a) => a.target === "playliquid-web") ?? null,
+        // The declarative artifact text — the EXACT package definition.
+        // The browser loads this and interprets it through the DeclarativePackageInterpreter.
+        // If this is present, the browser uses it INSTEAD of the family fallback.
+        declarativeArtifact: artifactText,
       };
     }),
     // ── Capability Policies (protocol.capabilities) ──
