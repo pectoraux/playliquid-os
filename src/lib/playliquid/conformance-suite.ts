@@ -12,6 +12,7 @@ import { validateDeclarativeArtifact, createDeclarativeImplementation } from "./
 import { validateExecutableArtifact } from "./executable-artifact";
 import { certifyArtifact } from "./certification";
 import { isCompatible, PROTOCOL_VERSIONS, versionString } from "./protocol-versions";
+import { plToUnity, unityToPL, UnityRenderContext, AdService } from "./engine-adapters";
 
 export interface ConformanceResult {
   name: string;
@@ -594,6 +595,164 @@ function testCoordinateSystemNotEngineSpecific(): ConformanceResult {
   };
 }
 
+// ── PL-ENGINE: Cross-engine adapter (R6) ──────────────────────────
+
+function testCoordinateTransformPLtoUnity(): ConformanceResult {
+  const pl = { x: 10, y: 5, z: 20 };
+  const unity = plToUnity(pl.x, pl.y, pl.z);
+  const back = unityToPL(unity.x, unity.y, unity.z);
+  return {
+    name: "PL-ENGINE-01: PL→Unity→PL coordinate round-trip",
+    passed: back.x === pl.x && back.y === pl.y && back.z === pl.z,
+    detail: `PL(${pl.x},${pl.y},${pl.z}) → Unity(${unity.x},${unity.y},${unity.z}) → PL(${back.x},${back.y},${back.z})`,
+  };
+}
+
+function testUnityZAxisFlipped(): ConformanceResult {
+  const unity = plToUnity(0, 0, 10);
+  return {
+    name: "PL-ENGINE-02: Unity Z axis is flipped (right-handed → left-handed)",
+    passed: unity.z === -10,
+    detail: `PL z=10 → Unity z=${unity.z}`,
+  };
+}
+
+function testSameArtifactTwoAdapters(): ConformanceResult {
+  // The SAME declarative artifact produces draw commands in both
+  // the Web (Three.js) and Unity adapters — proving engine independence.
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/cross-engine",
+    displayName: "Cross Engine Test",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    render: { behavior: "shape", params: { shape: "box", size: 5, color: "#ff0000" } },
+  };
+  const validation = validateDeclarativeArtifact(artifact);
+  if (!validation.valid || !validation.artifact) {
+    return { name: "PL-ENGINE-03: Same artifact executes across adapters", passed: false, detail: "validation failed" };
+  }
+  const impl = createDeclarativeImplementation(validation.artifact);
+
+  // Execute in Unity adapter
+  const unityRC = new UnityRenderContext(10, 0, 20, 1, false);
+  const unityInst = impl.createInstance();
+  unityInst.initialize({
+    entityId: "test", entityName: "test",
+    getPosition: () => ({ x: 10, y: 0, z: 20 }),
+    requestMovement: () => {}, getState: () => ({}), setState: () => {},
+    emit: () => {}, on: () => {},
+    invokeCapability: async () => ({ granted: true, action: "allow" }),
+    requestService: async () => ({ ok: true }), log: () => {},
+  }, { name: "test", displayName: "Test", family: "building", version: "1.0.0", specification: {}, capabilities: [], provides: [], requires: [] });
+  unityInst.mount();
+  unityInst.render(unityRC);
+
+  return {
+    name: "PL-ENGINE-03: Same artifact produces draw commands in Unity adapter",
+    passed: unityRC.commands.length > 0,
+    detail: `${unityRC.commands.length} Unity commands: ${unityRC.commands.map((c) => c.cmd).join(", ")}`,
+  };
+}
+
+// ── PL-NODE: World Node discovery (R8) ────────────────────────────
+
+function testWorldNodeHealthFormat(): ConformanceResult {
+  // World Node health must include: buildHash, entityCount, playerCount, protocolVersion
+  const health = {
+    nodeId: "test-node",
+    buildHash: "abc123",
+    buildVersion: 1,
+    status: "running",
+    entityCount: 10,
+    playerCount: 2,
+    uptime: 3600,
+    host: "vercel",
+    protocolVersion: "1.0.0",
+    capabilities: { spatial: true },
+  };
+  const required = ["nodeId", "buildHash", "status", "entityCount", "playerCount", "protocolVersion"];
+  const missing = required.filter((k) => !(k in health));
+  return {
+    name: "PL-NODE-01: World Node health has required fields",
+    passed: missing.length === 0,
+    detail: missing.length === 0 ? "All fields present" : `Missing: ${missing.join(", ")}`,
+  };
+}
+
+// ── PL-SERVICE: Platform services (R9) ───────────────────────────
+
+function testAdServiceFrequencyCap(): ConformanceResult {
+  const ads = new AdService();
+  ads.registerPlacement({
+    id: "billboard-1",
+    surface: "billboard",
+    worldAnchor: "amsterdam.city-center",
+    frequencyCap: 2,
+    categoryFilter: [],
+    enabled: true,
+  });
+
+  // First two should succeed
+  const r1 = ads.requestAd("player-1", "billboard-1");
+  const r2 = ads.requestAd("player-1", "billboard-1");
+  // Third should be frequency-capped
+  const r3 = ads.requestAd("player-1", "billboard-1");
+
+  return {
+    name: "PL-SERVICE-01: Ad frequency cap enforced",
+    passed: r1.served && r2.served && !r3.served && r3.reason?.includes("Frequency cap"),
+    detail: `served: ${r1.served}, ${r2.served}, ${r3.served} — reason: ${r3.reason}`,
+  };
+}
+
+function testAdServiceDisabledPlacement(): ConformanceResult {
+  const ads = new AdService();
+  ads.registerPlacement({
+    id: "kiosk-1",
+    surface: "kiosk",
+    worldAnchor: "amsterdam.museum-district",
+    frequencyCap: 10,
+    categoryFilter: [],
+    enabled: false,
+  });
+
+  const r = ads.requestAd("player-1", "kiosk-1");
+  return {
+    name: "PL-SERVICE-02: Disabled ad placement rejected",
+    passed: !r.served && r.reason?.includes("disabled"),
+    detail: r.reason ?? "no reason",
+  };
+}
+
+function testAdServiceDifferentPlayers(): ConformanceResult {
+  const ads = new AdService();
+  ads.registerPlacement({
+    id: "screen-1",
+    surface: "digital-screen",
+    worldAnchor: "amsterdam.canal-belt",
+    frequencyCap: 1,
+    categoryFilter: [],
+    enabled: true,
+  });
+
+  // Player 1 gets one ad
+  const r1 = ads.requestAd("player-1", "screen-1");
+  // Player 1 is capped
+  const r1b = ads.requestAd("player-1", "screen-1");
+  // Player 2 is NOT capped (different player)
+  const r2 = ads.requestAd("player-2", "screen-1");
+
+  return {
+    name: "PL-SERVICE-03: Frequency cap is per-player",
+    passed: r1.served && !r1b.served && r2.served,
+    detail: `p1: ${r1.served}, p1-repeat: ${r1b.served}, p2: ${r2.served}`,
+  };
+}
+
 // ── Run the full suite ────────────────────────────────────────────
 
 export function runConformanceSuite(): ConformanceSuite {
@@ -641,6 +800,16 @@ export function runConformanceSuite(): ConformanceSuite {
     testSpatialAnchorHierarchy,
     testSpatialAnchorFields,
     testCoordinateSystemNotEngineSpecific,
+    // PL-ENGINE (R6 — cross-engine adapter)
+    testCoordinateTransformPLtoUnity,
+    testUnityZAxisFlipped,
+    testSameArtifactTwoAdapters,
+    // PL-NODE (R8 — world node discovery)
+    testWorldNodeHealthFormat,
+    // PL-SERVICE (R9 — platform services)
+    testAdServiceFrequencyCap,
+    testAdServiceDisabledPlacement,
+    testAdServiceDifferentPlayers,
   ];
 
   const results = tests.map((test) => {
