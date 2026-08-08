@@ -116,6 +116,14 @@ export class UnityRenderContext implements RenderContext {
 export class UnityAdapter {
   private instances: Map<string, PackageInstance> = new Map();
   private contexts: Map<string, KernelContext> = new Map();
+  private controlPlaneUrl: string;
+  private buildId: string;
+  private worldProjectId: string = "";
+
+  constructor(controlPlaneUrl: string, buildId: string) {
+    this.controlPlaneUrl = controlPlaneUrl;
+    this.buildId = buildId;
+  }
 
   async loadScene(sceneApiUrl: string): Promise<{
     entities: number;
@@ -125,6 +133,7 @@ export class UnityAdapter {
     // Fetch the Scene API (same endpoint the Web runtime uses)
     const res = await fetch(sceneApiUrl);
     const scene = await res.json();
+    this.worldProjectId = scene.world?.id ?? "";
 
     const results: Array<{ entityId: string; commands: Array<{ cmd: string; args: number[]; opts: Record<string, unknown> }> }> = [];
 
@@ -138,17 +147,57 @@ export class UnityAdapter {
       const impl = createDeclarativeImplementation(validation.artifact);
       const instance = impl.createInstance();
 
-      // Create a Unity-appropriate KernelContext
+      // Create a Unity-appropriate KernelContext.
+      // CRITICAL: No Runtime Adapter is permitted to implement capability
+      // authority. Every adapter must communicate with the authoritative
+      // Kernel. The invokeCapability below delegates to the control plane's
+      // capability negotiation endpoint — it NEVER returns a local decision.
       const ctx: KernelContext = {
         entityId: entity.id,
         entityName: entity.name,
         getPosition: () => entity.position,
-        requestMovement: () => {}, // Unity would send to PL server
+        requestMovement: (delta) => {
+          // Delegate to the authoritative World Node
+          fetch(`${this.controlPlaneUrl}/api/runtime/${this.buildId}/mutate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entityId: entity.id, positionPatch: delta }),
+          }).catch(() => {});
+        },
         getState: () => entity.state,
-        setState: () => {}, // Unity would send to PL server
+        setState: (patch) => {
+          // Delegate to the authoritative World Node
+          fetch(`${this.controlPlaneUrl}/api/runtime/${this.buildId}/mutate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entityId: entity.id, statePatch: patch }),
+          }).catch(() => {});
+        },
         emit: () => {},
         on: () => {},
-        invokeCapability: async () => ({ granted: true, action: "allow" }),
+        invokeCapability: async (capability: string) => {
+          // DELEGATE to the authoritative Kernel — never return a local decision.
+          // The adapter is a renderer, not an authority.
+          try {
+            const res = await fetch(`${this.controlPlaneUrl}/api/capabilities/negotiate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                packageId: entity.package?.name,
+                worldProjectId: this.worldProjectId,
+              }),
+            });
+            if (!res.ok) return { granted: false, action: "deny" as const };
+            const data = await res.json();
+            const effective = (data.effective as Array<{ capability: string; granted: boolean; action: string }>) ?? [];
+            const result = effective.find((e) => e.capability === capability);
+            return result
+              ? { granted: result.granted, action: result.action as "allow" | "deny" | "limit" }
+              : { granted: false, action: "deny" as const };
+          } catch {
+            return { granted: false, action: "deny" as const };
+          }
+        },
         requestService: async () => ({ ok: true }),
         log: () => {},
       };

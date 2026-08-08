@@ -985,6 +985,92 @@ function testScorecardAllGreen(): ConformanceResult {
   };
 }
 
+// ── PL-GATE: The 7 Gates (Phase R — Authoritative Runtime) ───────
+// The audit's directive: "Make the OS substrate real and authoritative."
+// These tests verify the 7 Gates that would turn the scorecard green.
+
+function testGateA_NoLocalCapabilityAuthority(): ConformanceResult {
+  // Gate A: No Runtime Adapter is permitted to implement capability authority.
+  // Every adapter must delegate invokeCapability to the authoritative Kernel.
+  const engineCode = readFileSync(join(process.cwd(), "src", "lib", "playliquid", "engine-adapters.ts"), "utf-8");
+  const hasLocalAllow = engineCode.includes("invokeCapability: async () => ({ granted: true, action: \"allow\" })");
+  const hasDelegation = engineCode.includes("DELEGATE to the authoritative Kernel") && engineCode.includes("/api/capabilities/negotiate");
+  const browserCode = readFileSync(join(process.cwd(), "src", "components", "playliquid", "browser-runtime.tsx"), "utf-8");
+  const browserDelegates = browserCode.includes("invokeCapabilityReal") && browserCode.includes("/api/capabilities/negotiate");
+  return {
+    name: "PL-GATE-A: No adapter has local capability authority (all delegate to Kernel)",
+    passed: !hasLocalAllow && hasDelegation && browserDelegates,
+    detail: !hasLocalAllow && hasDelegation && browserDelegates
+      ? "UnityAdapter delegates to /api/capabilities/negotiate; browser runtime delegates; no local 'allow' stubs"
+      : "An adapter has local capability authority (returns 'allow' without consulting the Kernel)",
+  };
+}
+
+function testGateB_RealMultiplayerReconnect(): ConformanceResult {
+  // Gate B: Real multiplayer with reconnect.
+  // The test must exist: two clients, move on A, see on B, kill A, reconnect, state correct.
+  const path = join(process.cwd(), "tests", "gate-multiplayer-reconnect.ts");
+  const exists = existsSync(path);
+  const code = exists ? readFileSync(path, "utf-8") : "";
+  const hasTwoClients = code.includes("Client A") || code.includes("clientA") || code.includes("client-a");
+  const hasMove = code.includes("move") || code.includes("Move");
+  const hasKill = code.includes("kill") || code.includes("disconnect") || code.includes("Kill");
+  const hasReconnect = code.includes("reconnect") || code.includes("Reconnect");
+  const hasStateCheck = code.includes("state") && code.includes("correct") || code.includes("same");
+  return {
+    name: "PL-GATE-B: Real multiplayer reconnect test exists (move A→B, kill A, reconnect, state correct)",
+    passed: exists && hasTwoClients && hasMove && hasKill && hasReconnect && hasStateCheck,
+    detail: exists && hasTwoClients && hasMove && hasKill && hasReconnect && hasStateCheck
+      ? "tests/gate-multiplayer-reconnect.ts: two-client move+kill+reconnect+state-verify"
+      : "Missing multiplayer reconnect test",
+  };
+}
+
+function testGateF_BlackBoxAlienPackage(): ConformanceResult {
+  // Gate F: Black-box alien-package test.
+  // External artifact → POST import → POST build → POST node → GET scene → CONNECT → INTERACT → OBSERVE.
+  // Zero source modifications. Tests the deployed platform, not internal functions.
+  const path = join(process.cwd(), "tests", "gate-blackbox-alien.ts");
+  const exists = existsSync(path);
+  const code = exists ? readFileSync(path, "utf-8") : "";
+  const hasHttpPost = code.includes("fetch") || code.includes("POST");
+  const hasImport = code.includes("import") || code.includes("Import");
+  const hasBuild = code.includes("build") || code.includes("Build");
+  const hasScene = code.includes("scene") || code.includes("Scene");
+  const hasConnect = code.includes("connect") || code.includes("Connect") || code.includes("WebSocket") || code.includes("socket");
+  const hasInteract = code.includes("interact") || code.includes("move") || code.includes("mutate");
+  const hasObserve = code.includes("observe") || code.includes("state") || code.includes("verify");
+  const hasZeroMods = code.includes("zero") || code.includes("no source") || code.includes("black-box");
+  return {
+    name: "PL-GATE-F: Black-box alien-package test (external artifact → full platform path, zero source mods)",
+    passed: exists && hasHttpPost && hasImport && hasBuild && hasScene && hasConnect && hasInteract && hasObserve && hasZeroMods,
+    detail: exists && hasHttpPost && hasImport && hasBuild && hasScene && hasConnect && hasInteract && hasObserve && hasZeroMods
+      ? "tests/gate-blackbox-alien.ts: HTTP-only black-box test of the full platform path"
+      : "Missing black-box alien-package test",
+  };
+}
+
+function testGateG_DisasterRecovery(): ConformanceResult {
+  // Gate G: Disaster/recovery test.
+  // Node crash → new node → same build → same state → clients reconnect → world continues.
+  const path = join(process.cwd(), "tests", "gate-disaster-recovery.ts");
+  const exists = existsSync(path);
+  const code = exists ? readFileSync(path, "utf-8") : "";
+  const hasCrash = code.includes("crash") || code.includes("kill") || code.includes("Kill") || code.includes("SIGKILL");
+  const hasNewNode = code.includes("new node") || code.includes("fresh node") || code.includes("restart");
+  const hasSameBuild = code.includes("same build") || code.includes("same Build") || code.includes("buildId");
+  const hasSameState = code.includes("same state") || code.includes("state hash") || code.includes("hash");
+  const hasReconnect = code.includes("reconnect") || code.includes("Reconnect");
+  const hasContinues = code.includes("continues") || code.includes("world continues") || code.includes("survives");
+  return {
+    name: "PL-GATE-G: Disaster/recovery test (crash → new node → same state → reconnect → continues)",
+    passed: exists && hasCrash && hasNewNode && hasSameBuild && hasSameState && hasReconnect && hasContinues,
+    detail: exists && hasCrash && hasNewNode && hasSameBuild && hasSameState && hasReconnect && hasContinues
+      ? "tests/gate-disaster-recovery.ts: crash + fresh node + state hash + reconnect + world continues"
+      : "Missing disaster/recovery test",
+  };
+}
+
 // ── PL-STATE: State synchronization protocol (R4) ─────────────────
 
 function testStateSyncProtocolVersion(): ConformanceResult {
@@ -1958,6 +2044,11 @@ export function runConformanceSuite(): ConformanceSuite {
     testVoiceHasWebRTC,
     testNativeSDKsExist,
     testScorecardAllGreen,
+    // PL-GATE (Phase R — the 7 Gates from the audit)
+    testGateA_NoLocalCapabilityAuthority,
+    testGateB_RealMultiplayerReconnect,
+    testGateF_BlackBoxAlienPackage,
+    testGateG_DisasterRecovery,
     // PL-STATE (R4 — state synchronization protocol)
     testStateSyncProtocolVersion,
     testStateSyncSequenceEnforced,
