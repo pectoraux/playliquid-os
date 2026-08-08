@@ -1,15 +1,20 @@
 // Playliquid OS — Frozen Primitives Schema
 // 10 permanent contracts: Package, Specification, Contract, Entity,
 // WorldProject, WorldBuild, Kernel, RuntimeAdapter, WorldNode, WorldService.
+//
+// NOTE on provider: models use only portable scalar types (String, Int, Float,
+// Boolean, DateTime) so the schema is identical across SQLite (local/sandbox)
+// and PostgreSQL (Neon/Vercel production). To deploy to Neon, change
+// `provider = "sqlite"` → `provider = "postgresql"` and set DATABASE_URL +
+// DIRECT_URL to the Neon connection strings. No model edits are required.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -44,6 +49,7 @@ model Package {
   generationReq  GenerationRequest?
   contributions  Contribution[]
   runtimeArtifacts RuntimeArtifact[]
+  versions       PackageVersion[]
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -114,6 +120,7 @@ model WorldProject {
   commits WorldCommit[]
   pullRequests PullRequest[]
   spatialAnchors SpatialAnchor[]
+  sensoryChannels SensoryChannel[]
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -541,4 +548,204 @@ model RuntimeArtifact {
   updatedAt   DateTime @updatedAt
 
   @@unique([packageId, target])
+}
+
+// ════════════════════════════════════════════════════════════════
+// DURABLE WORLD STATE — Event Sourcing + Snapshots (Phase G.1)
+//
+// Implements the `kernel.persistence` contract as a real adapter.
+// The World Node does NOT own its filesystem for state durability —
+// it appends events and writes snapshots through the control plane,
+// which stores them here. A World Node can be killed (-9), its local
+// /tmp destroyed, and a fresh node on a clean machine recovers the
+// exact world state from this store.
+//
+//   WorldEvent    = append-only, ordered by (buildId, seq) — the
+//                   authoritative history of every state mutation.
+//   WorldSnapshot = full-state checkpoint; recovery loads the latest
+//                   snapshot then replays WorldEvents with seq >
+//                   snapshot.seq.
+//
+// These tables are the durable substrate. The PersistenceService
+// interface (in the World Node) is the OS contract that hides whether
+// the backend is this DB, Postgres, S3, Redis, or object storage.
+// ════════════════════════════════════════════════════════════════
+model WorldEvent {
+  id        String   @id @default(cuid())
+  buildId   String
+  seq       Int      // monotonic per-build sequence number assigned by the World Node
+  type      String   // "spawn" | "mutate" | "remove" | "session.join" | "session.leave"
+  entityId  String?
+  payload   String   // JSON: { position?, positionPatch?, statePatch?, timestamp, ... }
+  createdAt DateTime @default(now())
+
+  @@unique([buildId, seq])
+  @@index([buildId])
+  @@index([buildId, seq])
+}
+
+model WorldSnapshot {
+  id          String   @id @default(cuid())
+  buildId     String
+  seq         Int      // the buildSeq at which this snapshot was taken
+  entityCount Int
+  data        String   // JSON: { buildSeq, entities[], sessions[], timestamp }
+  createdAt   DateTime @default(now())
+
+  @@index([buildId, seq])
+  @@index([buildId, createdAt])
+}
+
+// ════════════════════════════════════════════════════════════════
+// WORLD SERVICES — Economy, Identity, Voice (Phase M)
+//
+// These implement the OS service contracts that packages consume.
+// The OS provides them; packages never re-implement them.
+// ════════════════════════════════════════════════════════════════
+
+// ── ECONOMY: wallets + transactions ──
+// A wallet is per-player per-world-project. Transactions are append-only
+// (double-entry ledger). Atomic debit/credit via DB transactions.
+model PlayerWallet {
+  id            String   @id @default(cuid())
+  playerId      String   // the PlayerIdentity id
+  worldProjectId String
+  currency      String   @default("PL") // e.g. "PL", "coins", "gems"
+  balance       Int      @default(0)     // integer units (cents-like)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([playerId, worldProjectId, currency])
+  @@index([worldProjectId])
+}
+
+model EconomyTransaction {
+  id            String   @id @default(cuid())
+  fromWalletId  String?  // null = mint (system credit)
+  toWalletId    String?  // null = burn (system debit)
+  amount        Int      // positive integer
+  currency      String
+  reason        String   // "purchase" | "reward" | "transfer" | "mint" | "burn"
+  reference     String?  // package-defined reference (e.g. itemId)
+  status        String   @default("confirmed") // confirmed | reverted
+  createdAt     DateTime @default(now())
+
+  @@index([fromWalletId])
+  @@index([toWalletId])
+  @@index([createdAt])
+}
+
+// ── IDENTITY: world-player identity (distinct from console User) ──
+// A PlayerIdentity is the in-world player. A User is the console account.
+// One User can have multiple PlayerIdentities (one per world).
+model PlayerIdentity {
+  id            String   @id @default(cuid())
+  userId        String?  // the console User (nullable for anonymous worlds)
+  worldProjectId String
+  displayName   String
+  avatarUrl     String?
+  metadata      String   @default("{}") // JSON: package-defined profile
+  status        String   @default("ACTIVE") // ACTIVE | BANNED | SUSPENDED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([worldProjectId])
+}
+
+// ── VOICE: spatial voice channels ──
+// A voice channel is a spatial audio room. Players join a channel;
+// the channel has a spatial attenuation model (closer = louder).
+model VoiceChannel {
+  id            String   @id @default(cuid())
+  worldProjectId String
+  name          String
+  spatialModel  String   @default("distance") // "distance" | "zone" | "global"
+  maxListeners  Int      @default(50)
+  metadata      String   @default("{}") // JSON
+  createdAt     DateTime @default(now())
+
+  @@index([worldProjectId])
+}
+
+model VoiceChannelMember {
+  id            String   @id @default(cuid())
+  channelId     String
+  playerId      String
+  position      String   @default("{}") // JSON {x,y,z} — for spatial attenuation
+  muted         Boolean  @default(false)
+  speaking      Boolean  @default(false)
+  joinedAt      DateTime @default(now())
+
+  @@unique([channelId, playerId])
+  @@index([channelId])
+}
+
+// ════════════════════════════════════════════════════════════════
+// REGISTRY / MARKETPLACE — Package Versions (Phase N)
+//
+// A Package has multiple published versions. Each version is an
+// immutable publication: version string, content hash, artifact URI,
+// changelog, certification record. The latest version is the default;
+// consumers can pin a specific version or use semver resolution.
+// ════════════════════════════════════════════════════════════════
+model PackageVersion {
+  id            String   @id @default(cuid())
+  packageId     String
+  package       Package  @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  version       String   // semver: "1.0.0", "1.1.0", "2.0.0"
+  hash          String   // content-addressed hash of this version's artifact
+  artifactUri   String   // where the versioned artifact lives
+  changelog     String   @default("") // what changed in this version
+  license       String   @default("MIT") // SPDX identifier
+  certification String   @default("{}") // JSON: certification record for this version
+  status        String   @default("published") // published | deprecated | yanked
+  publishedBy   String   @default("anonymous")
+  downloadCount Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@unique([packageId, version])
+  @@index([packageId])
+  @@index([packageId, version])
+  @@index([status])
+}
+
+// ════════════════════════════════════════════════════════════════
+// SENSORY RUNTIME — Smell, Haptics, Taste, Proprioception (Phase Q)
+//
+// Sensory emissions are like visual draw commands, but for non-visual
+// senses. A package emits a "smell of coffee" at a position; the
+// sensory adapter translates it to the player's olfactory device.
+// Spatial attenuation: closer = stronger, like voice.
+// ════════════════════════════════════════════════════════════════
+model SensoryChannel {
+  id            String   @id @default(cuid())
+  worldProjectId String
+  worldProject  WorldProject @relation(fields: [worldProjectId], references: [id], onDelete: Cascade)
+  name          String   // "smell" | "haptic" | "taste" | "proprioception"
+  channelType   String   // "olfactory" | "haptic" | "gustatory" | "vestibular"
+  maxRange      Float    @default(50) // spatial attenuation range
+  metadata      String   @default("{}") // JSON
+  createdAt     DateTime @default(now())
+
+  emissions     SensoryEmission[]
+
+  @@unique([worldProjectId, name])
+  @@index([worldProjectId])
+}
+
+model SensoryEmission {
+  id            String   @id @default(cuid())
+  channelId     String
+  channel       SensoryChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  entityId      String   // which entity emitted this
+  intensity     Float    @default(1.0) // 0.0 to 1.0
+  position      String   // JSON {x,y,z} — for spatial attenuation
+  payload       String   @default("{}") // JSON: { scent: "coffee", duration: 5000 }
+  expiresAt     DateTime? // when the emission fades (null = persistent)
+  createdAt     DateTime @default(now())
+
+  @@index([channelId])
+  @@index([entityId])
+  @@index([createdAt])
 }

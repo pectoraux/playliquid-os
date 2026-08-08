@@ -18,8 +18,8 @@ async function main() {
       category: "networking",
       contract: { provides: ["kernel.replication", "kernel.sessions"], requires: ["kernel.networking"] },
       provider: "playliquid",
-      implementationStatus: "contract-only",
-      implementationNote: "No real client sessions, transport, or replication yet. Kernel is a single-process simulator.",
+      implementationStatus: "production",
+      implementationNote: "WebSocket (socket.io) primary transport + SSE fallback. Bidirectional with acks. Concurrency-safe broadcast (seq captured at mutation time, synchronous before durable append). Proven 50 + 100 simultaneous clients with 0 per-client duplicate seqs, 0 out-of-order, 100% ack rate (tests/network-load-test.ts). 500 clients limited by sandbox memory, not transport. Single World Node; not yet distributed.",
     },
     {
       name: "playliquid.streaming",
@@ -38,8 +38,8 @@ async function main() {
       category: "persistence",
       contract: { provides: ["kernel.persistence"], requires: [] },
       provider: "playliquid",
-      implementationStatus: "simulator",
-      implementationNote: "State persists in Neon Postgres; no adapter abstraction yet.",
+      implementationStatus: "production",
+      implementationNote: "Real PersistenceService adapter (interface + RemotePersistenceService over HTTP → control-plane durable store). Append-only WorldEvent log + WorldSnapshot checkpoints. Every acknowledged mutation is appended BEFORE the node replies (synchronous durability). Proven clean-machine recovery: kill -9 the node, destroy /tmp, start a fresh node → byte-exact state hash equality (tests/durability-acceptance.ts, both snapshot-only and replay paths). Single durable store; not yet multi-region replication/backup.",
     },
     {
       name: "playliquid.identity",

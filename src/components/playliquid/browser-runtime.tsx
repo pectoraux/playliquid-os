@@ -14,6 +14,7 @@
 // them through the PackageExecutor.
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { io, type Socket } from "socket.io-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,8 @@ import type {
 } from "@/lib/playliquid/package-abi";
 import { artifactLoader } from "@/lib/playliquid/packages";
 import { validateDeclarativeArtifact, createDeclarativeImplementation } from "@/lib/playliquid/declarative-artifact";
+import { ResourceGuard } from "@/lib/playliquid/resource-guard";
+import { DEFAULT_LIMITS } from "@/lib/playliquid/certification";
 
 // ── Scene types ───────────────────────────────────────────────────
 interface SceneEntity {
@@ -156,6 +159,8 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
   const [textOutput, setTextOutput] = useState("");
   const [tickCount, setTickCount] = useState(0);
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
+  const [transport, setTransport] = useState<"websocket" | "sse">("sse");
+  const [wsPort, setWsPort] = useState<number>(3002);
 
   const sceneRef = useRef<WorldScene | null>(null);
   const authStateRef = useRef<Map<string, AuthoritativeEntity>>(new Map());
@@ -168,6 +173,11 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
   const animationRef = useRef<number>(0);
   const keysRef = useRef<Record<string, boolean>>({});
   const cameraAngleRef = useRef({ theta: 0, phi: 0.6, distance: 40 });
+  const socketRef = useRef<Socket | null>(null);
+  const transportRef = useRef<"websocket" | "sse">("sse");
+  const sessionIdRef = useRef<string | null>(null);
+  // Phase L: shared audit log for all ResourceGuards (capability + kill events)
+  const auditLogRef = useRef<Array<{ timestamp: number; entityId: string; event: string; details: Record<string, unknown> }>>([]);
 
   // Fetch scene
   useEffect(() => {
@@ -184,9 +194,115 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
     fetchScene();
   }, [buildId]);
 
-  // Join session
+  // Keep sessionIdRef synced (for transport-aware mutation helpers)
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { transportRef.current = transport; }, [transport]);
+
+  // ── Shared message handler (identical for WS + SSE) ─────────────
+  // G1.2: both transports emit the SAME JSON. One handler, two pipes.
+  const handleTransportMessage = useCallback((raw: string) => {
+    try {
+      const msg = JSON.parse(raw);
+      if (msg.type === "snapshot") {
+        const map = new Map<string, AuthoritativeEntity>();
+        for (const e of (msg.entities as Array<{ entityId: string; position: { x: number; y: number; z: number }; state: Record<string, unknown> }>)) {
+          map.set(e.entityId, { position: e.position, state: e.state });
+        }
+        authStateRef.current = map;
+        setSessions(msg.sessions ?? []);
+      } else if (msg.type === "state") {
+        authStateRef.current.set(msg.entityId, { position: msg.position, state: msg.state });
+      } else if (msg.type === "event") {
+        if (msg.event === "session.join" || msg.event === "session.leave") {
+          // For WS transport the session list comes in the snapshot/ack;
+          // for SSE we fetch it. Both paths keep sessions in sync.
+          if (transportRef.current === "sse") {
+            fetch(`/api/runtime/${buildId}/session`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "list" }),
+            }).then(r => r.json()).then(data => setSessions(data.sessions ?? [])).catch(() => {});
+          }
+        }
+        if (msg.event === "entity.remove") {
+          authStateRef.current.delete(msg.entityId);
+          entityGroupsRef.current.delete(msg.entityId);
+        }
+      } else if (msg.type === "handoff") {
+        // Phase I: the entity crossed a zone boundary. Switch to the
+        // target node's WS port. The session ID is preserved — no
+        // re-authentication. The new node already has the entity (it
+        // was forwarded by the control plane's handoff coordinator).
+        const newWsPort = msg.toNodeWsPort as number;
+        const handoffSessionId = msg.sessionId as string | undefined;
+        if (typeof newWsPort === "number" && newWsPort > 0) {
+          // Preserve the session ID across the handoff
+          if (handoffSessionId) {
+            setSessionId(handoffSessionId);
+            sessionIdRef.current = handoffSessionId;
+          }
+          // Switch to the new node's WS port (triggers the WS effect to
+          // reconnect via the wsPort dependency)
+          setWsPort(newWsPort);
+          setTransport("websocket");
+        }
+      }
+    } catch { /* parse error */ }
+  }, [buildId]);
+
+  // ── WebSocket transport (primary) ───────────────────────────────
+  // G1.2: socket.io to the World Node's WS port via the gateway
+  // (XTransformPort). Bidirectional: join/move/mutate are emits, not
+  // HTTP POSTs. Falls back to SSE if the World Node WS is unreachable.
   useEffect(() => {
-    if (!buildId) return;
+    if (!buildId || transport !== "websocket") return;
+    const sock = io(`/?XTransformPort=${wsPort}`, {
+      transports: ["websocket", "polling"],
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 3,
+      reconnectionDelay: 1000,
+      timeout: 4000,
+    });
+    socketRef.current = sock;
+
+    sock.on("connect", () => {
+      setConnected(true);
+      // Phase I: if we already have a sessionId (e.g. after a handoff),
+      // do NOT re-join — the target node already has our entity. Just
+      // connect and receive the snapshot (which includes our entity).
+      const existingSid = sessionIdRef.current;
+      if (existingSid) {
+        // Session already exists (handoff or reconnect) — no new avatar
+        return;
+      }
+      // Fresh join — spawn a new avatar
+      sock.emit("session:join", { name: `Player-${Math.random().toString(36).slice(2, 6)}` }, (ack: unknown) => {
+        const a = ack as { ok?: boolean; sessionId?: string; sessions?: SessionInfo[] };
+        if (a?.ok && a.sessionId) {
+          setSessionId(a.sessionId);
+          sessionIdRef.current = a.sessionId;
+          setSessions(a.sessions ?? []);
+        }
+      });
+    });
+    sock.on("disconnect", () => setConnected(false));
+    sock.on("message", (data: string) => handleTransportMessage(data));
+
+    return () => {
+      // Phase I: do NOT emit session:leave on cleanup if this is a
+      // handoff (the entity was already transferred). Only leave on
+      // full unmount (buildId change).
+      sock.disconnect();
+      socketRef.current = null;
+      setConnected(false);
+    };
+  }, [buildId, transport, wsPort, handleTransportMessage]);
+
+  // ── SSE transport (fallback) ────────────────────────────────────
+  // Join session + stream. Used when transport === "sse" (default) or
+  // when the World Node WS is not running.
+  useEffect(() => {
+    if (!buildId || transport !== "sse") return;
     fetch(`/api/runtime/${buildId}/session`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "join", name: `Player-${Math.random().toString(36).slice(2, 6)}` }),
@@ -195,49 +311,23 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       setSessions(data.sessions ?? []);
     }).catch(() => {});
     return () => {
-      if (sessionId) {
+      if (sessionIdRef.current) {
         fetch(`/api/runtime/${buildId}/session`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "leave", sessionId }),
+          body: JSON.stringify({ action: "leave", sessionId: sessionIdRef.current }),
         }).catch(() => {});
       }
     };
-  }, [buildId]);
+  }, [buildId, transport]);
 
-  // SSE stream
   useEffect(() => {
-    if (!buildId) return;
+    if (!buildId || transport !== "sse") return;
     const es = new EventSource(`/api/runtime/${buildId}/stream`);
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
-    es.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === "snapshot") {
-          const map = new Map<string, AuthoritativeEntity>();
-          for (const e of (msg.entities as Array<{ entityId: string; position: { x: number; y: number; z: number }; state: Record<string, unknown> }>)) {
-            map.set(e.entityId, { position: e.position, state: e.state });
-          }
-          authStateRef.current = map;
-          setSessions(msg.sessions ?? []);
-        } else if (msg.type === "state") {
-          authStateRef.current.set(msg.entityId, { position: msg.position, state: msg.state });
-        } else if (msg.type === "event") {
-          if (msg.event === "session.join" || msg.event === "session.leave") {
-            fetch(`/api/runtime/${buildId}/session`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "list" }),
-            }).then(r => r.json()).then(data => setSessions(data.sessions ?? [])).catch(() => {});
-          }
-          if (msg.event === "entity.remove") {
-            authStateRef.current.delete(msg.entityId);
-            entityGroupsRef.current.delete(msg.entityId);
-          }
-        }
-      } catch { /* parse error */ }
-    };
+    es.onmessage = (ev) => handleTransportMessage(ev.data);
     return () => { es.close(); setConnected(false); };
-  }, [buildId]);
+  }, [buildId, transport, handleTransportMessage]);
 
   // Real Kernel capability enforcement
   const invokeCapabilityReal = useCallback(async (entityId: string, capability: string) => {
@@ -260,25 +350,27 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
     } catch { return { granted: false, action: "deny" as const }; }
   }, []);
 
+  // G1.2: transport-aware mutation. WS emits; SSE falls back to HTTP POST.
+  function sendMutate(entityId: string, mutation: { positionPatch?: { x: number; y: number; z: number }; statePatch?: Record<string, unknown> }) {
+    if (!buildId) return;
+    const sock = socketRef.current;
+    if (sock && transportRef.current === "websocket" && sock.connected) {
+      sock.emit("entity:mutate", { entityId, ...mutation });
+    } else {
+      fetch(`/api/runtime/${buildId}/mutate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityId, ...mutation }),
+      }).catch(() => {});
+    }
+  }
+
   function createKernelContext(entity: SceneEntity): KernelContext {
     return {
       entityId: entity.id, entityName: entity.name,
       getPosition: () => authStateRef.current.get(entity.id)?.position ?? entity.position,
-      requestMovement: (delta) => {
-        if (!buildId) return;
-        fetch(`/api/runtime/${buildId}/mutate`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entityId: entity.id, positionPatch: delta }),
-        }).catch(() => {});
-      },
+      requestMovement: (delta) => sendMutate(entity.id, { positionPatch: delta }),
       getState: () => authStateRef.current.get(entity.id)?.state ?? entity.state,
-      setState: (patch) => {
-        if (!buildId) return;
-        fetch(`/api/runtime/${buildId}/mutate`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entityId: entity.id, statePatch: patch }),
-        }).catch(() => {});
-      },
+      setState: (patch) => sendMutate(entity.id, { statePatch: patch }),
       emit: (event, payload) => { (eventHandlersRef.current.get(event) ?? []).forEach((h) => h(payload)); },
       on: (event, handler) => {
         if (!eventHandlersRef.current.has(event)) eventHandlersRef.current.set(event, []);
@@ -306,7 +398,9 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       if (!impl) impl = artifactLoader.resolveByName(entity.package.name, entity.package.family);
       if (impl) {
         const ctx = createKernelContext(entity);
-        const inst = impl.createInstance();
+        const rawInst = impl.createInstance();
+        // Phase L: wrap in ResourceGuard to enforce certification limits at runtime
+        const inst = new ResourceGuard(rawInst, entity.id, DEFAULT_LIMITS, 42, auditLogRef.current);
         inst.initialize(ctx, { name: entity.package.name, displayName: entity.package.displayName, family: entity.package.family, version: "1.0.0", specification: {}, capabilities: impl.capabilities, provides: [], requires: [] });
         inst.mount();
         packageInstancesRef.current.set(entity.id, inst);
@@ -323,7 +417,9 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       const impl = createDeclarativeImplementation(v.artifact);
       const entityLike: SceneEntity = { id: entityId, name: (auth.state.name as string) ?? "Entity", package: { name: v.artifact.name, family: v.artifact.family, displayName: v.artifact.displayName }, position: auth.position, components: [], state: auth.state, artifact: null, declarativeArtifact: da };
       const ctx = createKernelContext(entityLike);
-      const inst = impl.createInstance();
+      const rawInst = impl.createInstance();
+      // Phase L: wrap in ResourceGuard to enforce certification limits at runtime
+      const inst = new ResourceGuard(rawInst, entityId, DEFAULT_LIMITS, 42, auditLogRef.current);
       inst.initialize(ctx, { name: v.artifact.name, displayName: v.artifact.displayName, family: v.artifact.family, version: "1.0.0", specification: {}, capabilities: impl.capabilities, provides: [], requires: [] });
       inst.mount();
       packageInstancesRef.current.set(entityId, inst);
@@ -349,10 +445,16 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       if (keys[" "]) dy += speed; // space = up
       if (keys["shift"]) dy -= speed; // shift = down
       if (dx === 0 && dz === 0 && dy === 0) return;
-      fetch(`/api/runtime/${buildId}/move-player`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, deltaX: dx, deltaZ: dz }),
-      }).catch(() => {});
+      // G1.2: WS primary, SSE/HTTP fallback for player movement
+      const sock = socketRef.current;
+      if (sock && transportRef.current === "websocket" && sock.connected) {
+        sock.emit("player:move", { sessionId, deltaX: dx, deltaZ: dz });
+      } else {
+        fetch(`/api/runtime/${buildId}/move-player`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, deltaX: dx, deltaZ: dz }),
+        }).catch(() => {});
+      }
     }, 50);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -550,6 +652,7 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300"><Monitor className="mr-1 h-3 w-3" />PlayLiquid 3D Runtime</Badge>
         <Badge variant="outline" className={`font-mono text-[9px] ${connected ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"}`}><Wifi className="mr-1 h-2.5 w-2.5" />{connected ? "connected" : "disconnected"}</Badge>
+        <Badge variant="outline" className={`font-mono text-[9px] ${transport === "websocket" ? "border-violet-500/30 bg-violet-500/10 text-violet-300" : "border-zinc-500/30 bg-zinc-500/10 text-zinc-400"}`}>{transport === "websocket" ? "WS" : "SSE"}</Badge>
         <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 font-mono text-[9px] text-sky-300"><Users className="mr-1 h-2.5 w-2.5" />{sessions.length} player{sessions.length === 1 ? "" : "s"}</Badge>
         <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 font-mono text-[9px] text-amber-300"><Cpu className="mr-1 h-2.5 w-2.5" />{loadedCount} instances</Badge>
         <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 font-mono text-[9px] text-emerald-300"><Zap className="mr-1 h-2.5 w-2.5" />tick #{tickCount}</Badge>
@@ -559,6 +662,13 @@ export function BrowserRuntime({ buildId }: BrowserRuntimeProps) {
           <SelectContent>
             <SelectItem value="3d">3D (Three.js)</SelectItem>
             <SelectItem value="text">Text adapter</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={transport} onValueChange={(v) => setTransport(v as "websocket" | "sse")}>
+          <SelectTrigger className="h-7 w-[110px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="websocket">WebSocket</SelectItem>
+            <SelectItem value="sse">SSE (fallback)</SelectItem>
           </SelectContent>
         </Select>
       </div>

@@ -86,7 +86,7 @@ export async function nlToSpecification(
 // Rule-based fallback specification generator. Produces a valid canonical IR
 // from the natural-language input without an LLM. Used when the LLM provider
 // is unreachable so the pipeline never dead-ends.
-function fallbackSpecification(nl: string): Record<string, unknown> {
+export function fallbackSpecification(nl: string): Record<string, unknown> {
   const lower = nl.toLowerCase();
   const family = detectFamily(lower);
   const slug = nl
@@ -142,7 +142,7 @@ function detectFamily(lower: string): string {
 
 // Fallback artifact synthesizer. Produces a concise artifact description from
 // the canonical specification when the LLM is unreachable.
-function fallbackArtifact(canonical: Record<string, unknown>, nl: string): string {
+export function fallbackArtifact(canonical: Record<string, unknown>, nl: string): string {
   const family = (canonical.family as string) ?? "building";
   const name = (canonical.displayName as string) ?? "Package";
   const provides = (canonical.provides as Array<{ name: string }>) ?? [];

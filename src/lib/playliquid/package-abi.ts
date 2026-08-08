@@ -49,6 +49,11 @@ export interface KernelContext {
 
   // Logging
   log(level: "info" | "warn" | "error", message: string): void;
+
+  // Deterministic randomness — packages use this instead of Math.random()
+  // for reproducible worlds. Same seed → same sequence. Provided by the
+  // ResourceGuard so certification can verify determinism.
+  deterministicRandom?(): number;
 }
 
 // ── The engine-agnostic RenderContext ─────────────────────────────

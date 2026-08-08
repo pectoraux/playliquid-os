@@ -61,3 +61,5 @@ server.log
 /db/*.db-journal
 worklog.md
 set-vercel-env.py
+tool-results/
+db/custom.db
