@@ -55,9 +55,12 @@ let worldProjectId = "";
 const startedAt = Date.now();
 
 // ── Event Log (durable persistence) ───────────────────────────────
+// G2: Append-only event log + periodic snapshots for crash recovery.
+// On restart: load latest snapshot → replay events after snapshot → state restored.
+
 interface LogEntry {
   seq: number;
-  type: string;
+  type: string; // "spawn" | "mutate" | "remove" | "session.join" | "session.leave"
   entityId?: string;
   position?: { x: number; y: number; z: number };
   statePatch?: Record<string, unknown>;
@@ -67,26 +70,91 @@ interface LogEntry {
 
 const eventLog: LogEntry[] = [];
 const LOG_FILE = `/tmp/playliquid-events-${buildId}.log`;
+const SNAPSHOT_FILE = `/tmp/playliquid-snapshot-${buildId}.json`;
+let lastSnapshotSeq = 0;
+let eventsSinceSnapshot = 0;
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fs = require("fs");
 
 function appendLog(entry: LogEntry) {
   eventLog.push(entry);
-  // In production, this would be a durable append-only file/DB
-  // For the MVP, we keep it in memory + write to /tmp
+  eventsSinceSnapshot++;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require("fs");
     fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + "\n");
   } catch {}
+
+  // Periodic snapshot every 50 events
+  if (eventsSinceSnapshot >= 50) {
+    writeSnapshot();
+  }
 }
 
-function replayLog() {
+// ── Snapshot: full state checkpoint ───────────────────────────────
+function writeSnapshot() {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require("fs");
+    const snapshotData = {
+      buildSeq,
+      lastSnapshotSeq: buildSeq,
+      timestamp: Date.now(),
+      entities: Array.from(authoritativeState.entries()).map(([id, e]) => ({
+        entityId: id,
+        position: e.position,
+        state: e.state,
+        seq: e.seq,
+      })),
+      sessions: Array.from(sessions.entries()).map(([id, s]) => ({ sessionId: id, ...s })),
+    };
+    fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(snapshotData));
+    lastSnapshotSeq = buildSeq;
+    eventsSinceSnapshot = 0;
+    console.log(`  Snapshot written: ${snapshotData.entities.length} entities, seq=${buildSeq}`);
+  } catch (err) {
+    console.error("  Snapshot write failed:", err);
+  }
+}
+
+// ── Recovery: load snapshot + replay events after snapshot ────────
+function recoverState() {
+  let recoveredFromSnapshot = false;
+
+  // 1. Try to load snapshot
+  try {
+    const snapshotData = JSON.parse(fs.readFileSync(SNAPSHOT_FILE, "utf-8"));
+    buildSeq = snapshotData.buildSeq ?? 0;
+    lastSnapshotSeq = snapshotData.lastSnapshotSeq ?? 0;
+
+    for (const e of snapshotData.entities) {
+      authoritativeState.set(e.entityId, {
+        position: e.position,
+        state: e.state,
+        seq: e.seq,
+        updatedAt: snapshotData.timestamp,
+      });
+    }
+
+    for (const s of (snapshotData.sessions ?? [])) {
+      sessions.set(s.sessionId, { name: s.name, connectedAt: s.connectedAt });
+    }
+
+    console.log(`  Snapshot recovered: ${snapshotData.entities.length} entities, seq=${buildSeq}`);
+    recoveredFromSnapshot = true;
+  } catch {
+    console.log("  No snapshot found — starting fresh");
+  }
+
+  // 2. Replay events AFTER the snapshot
+  try {
     const data = fs.readFileSync(LOG_FILE, "utf-8");
     const lines = data.trim().split("\n");
+    let replayed = 0;
+
     for (const line of lines) {
       const entry = JSON.parse(line) as LogEntry;
+
+      // Skip events at or before the snapshot
+      if (recoveredFromSnapshot && entry.seq <= lastSnapshotSeq) continue;
+
       if (entry.type === "spawn") {
         authoritativeState.set(entry.entityId!, {
           position: entry.position!,
@@ -108,11 +176,22 @@ function replayLog() {
           entity.seq = entry.seq;
           entity.updatedAt = entry.timestamp;
         }
+      } else if (entry.type === "remove") {
+        authoritativeState.delete(entry.entityId!);
       }
+      buildSeq = Math.max(buildSeq, entry.seq);
+      replayed++;
     }
-    console.log(`  Replay: ${lines.length} events loaded from log`);
+
+    if (replayed > 0) {
+      console.log(`  Replay: ${replayed} events after snapshot (seq ${lastSnapshotSeq} → ${buildSeq})`);
+    } else if (recoveredFromSnapshot) {
+      console.log(`  No events to replay after snapshot`);
+    }
   } catch {
-    console.log("  No existing event log — starting fresh");
+    if (!recoveredFromSnapshot) {
+      console.log("  No event log found — starting completely fresh");
+    }
   }
 }
 
@@ -251,6 +330,8 @@ function removeSession(sessionId: string) {
   const avatarId = `avatar-${sessionId}`;
   authoritativeState.delete(avatarId);
   if (session) {
+    buildSeq++;
+    appendLog({ seq: buildSeq, type: "remove", entityId: avatarId, timestamp: Date.now() });
     broadcastEvent({ event: "session.leave", sessionId, name: session.name });
     broadcastEvent({ event: "entity.remove", entityId: avatarId });
   }
@@ -386,17 +467,68 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // ── Snapshot endpoint (force or inspect) ─────────────────────
+  if (url.pathname === "/snapshot") {
+    if (req.method === "POST") {
+      writeSnapshot();
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({ ok: true, seq: buildSeq, entities: authoritativeState.size }));
+    } else {
+      res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+      res.end(JSON.stringify({
+        lastSnapshotSeq,
+        eventsSinceSnapshot,
+        buildSeq,
+        entities: authoritativeState.size,
+        snapshotFile: SNAPSHOT_FILE,
+      }));
+    }
+    return;
+  }
+
+  // ── Recovery endpoint (inspect recovery state) ───────────────
+  if (url.pathname === "/recovery") {
+    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+    res.end(JSON.stringify({
+      hasSnapshot: fs.existsSync(SNAPSHOT_FILE),
+      hasEventLog: fs.existsSync(LOG_FILE),
+      lastSnapshotSeq,
+      eventLogEntries: eventLog.length,
+      buildSeq,
+      entities: authoritativeState.size,
+      logFile: LOG_FILE,
+      snapshotFile: SNAPSHOT_FILE,
+    }));
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Not found" }));
 });
 
 // ── Start ────────────────────────────────────────────────────────
 async function main() {
-  // Replay event log (recover from crash)
-  replayLog();
+  // G2: Recover state from snapshot + event log (crash recovery)
+  recoverState();
 
-  // Load world build from control plane
-  await loadWorldBuild();
+  // Only load from control plane if we didn't recover state
+  if (authoritativeState.size === 0) {
+    await loadWorldBuild();
+  } else {
+    // Fetch build metadata if not already loaded
+    if (!buildHash) {
+      try {
+        const res = await fetch(`${controlPlane}/api/runtime/${buildId}/scene`);
+        if (res.ok) {
+          const scene = await res.json();
+          buildHash = scene.world.buildHash;
+          worldProjectId = scene.world.id;
+          console.log(`  Build metadata loaded: ${scene.world.name} v${scene.world.buildVersion}`);
+        }
+      } catch {}
+    }
+    console.log(`  State recovered from log — skipping full scene load`);
+  }
 
   // Start server
   server.listen(port, () => {
@@ -406,7 +538,20 @@ async function main() {
     console.log(`  Mutate:    http://localhost:${port}/mutate`);
     console.log(`  Session:   http://localhost:${port}/session`);
     console.log(`  Event Log: ${eventLog.length} entries (${LOG_FILE})`);
+    console.log(`  Snapshot:  ${lastSnapshotSeq > 0 ? `seq=${lastSnapshotSeq}` : "none yet"}`);
     console.log(`\n  Waiting for clients...`);
+  });
+
+  // Graceful shutdown — write final snapshot
+  process.on("SIGTERM", () => {
+    console.log("\n  SIGTERM received — writing final snapshot...");
+    writeSnapshot();
+    process.exit(0);
+  });
+  process.on("SIGINT", () => {
+    console.log("\n  SIGINT received — writing final snapshot...");
+    writeSnapshot();
+    process.exit(0);
   });
 }
 

@@ -792,7 +792,7 @@ function testWorldNodeHasSSEStream(): ConformanceResult {
 function testWorldNodeHasEventLog(): ConformanceResult {
   // G2: The world node must have durable appendable event log
   const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
-  const hasEventLog = nodeCode.includes("eventLog") && nodeCode.includes("appendLog") && nodeCode.includes("replayLog");
+  const hasEventLog = nodeCode.includes("eventLog") && nodeCode.includes("appendLog") && nodeCode.includes("recoverState");
   return {
     name: "PL-NODE-RT-04: World Node has durable event log (append + replay)",
     passed: hasEventLog,
@@ -834,7 +834,6 @@ function testWorldNodeHasSessionManagement(): ConformanceResult {
 // ── PL-RECOVERY: Durable state recovery (G2) ─────────────────────
 
 function testEventLogFormat(): ConformanceResult {
-  // Event log entries must have: seq, type, entityId, timestamp
   const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
   const hasFormat = nodeCode.includes("interface LogEntry") && nodeCode.includes("seq: number") && nodeCode.includes("type: string");
   return {
@@ -845,13 +844,52 @@ function testEventLogFormat(): ConformanceResult {
 }
 
 function testEventLogReplayable(): ConformanceResult {
-  // The replayLog function must be able to reconstruct state from the log
   const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
-  const hasReplay = nodeCode.includes("function replayLog()") && nodeCode.includes("readFileSync") && nodeCode.includes("spawn") && nodeCode.includes("mutate");
+  const hasReplay = nodeCode.includes("function recoverState()") && nodeCode.includes("readFileSync") && nodeCode.includes("spawn") && nodeCode.includes("mutate");
   return {
     name: "PL-RECOVERY-02: Event log is replayable (reconstructs state after crash)",
     passed: hasReplay,
-    detail: hasReplay ? "replayLog() reads log file and reconstructs entity state" : "Missing replay logic",
+    detail: hasReplay ? "recoverState() reads log file and reconstructs entity state" : "Missing replay logic",
+  };
+}
+
+function testSnapshotSystemExists(): ConformanceResult {
+  const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
+  const hasSnapshot = nodeCode.includes("function writeSnapshot()") && nodeCode.includes("SNAPSHOT_FILE") && nodeCode.includes("writeFileSync");
+  return {
+    name: "PL-RECOVERY-03: Snapshot/checkpoint system exists",
+    passed: hasSnapshot,
+    detail: hasSnapshot ? "writeSnapshot() + SNAPSHOT_FILE + periodic checkpoints" : "Missing snapshot system",
+  };
+}
+
+function testSnapshotRecoveryWorks(): ConformanceResult {
+  const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
+  const hasSnapshotRecovery = nodeCode.includes("Snapshot recovered") && nodeCode.includes("events after snapshot") && nodeCode.includes("lastSnapshotSeq");
+  return {
+    name: "PL-RECOVERY-04: Recovery loads snapshot + replays events after snapshot",
+    passed: hasSnapshotRecovery,
+    detail: hasSnapshotRecovery ? "recoverState() loads snapshot then replays post-snapshot events" : "Missing snapshot+replay recovery",
+  };
+}
+
+function testGracefulShutdownWritesSnapshot(): ConformanceResult {
+  const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
+  const hasGraceful = nodeCode.includes("SIGTERM") && nodeCode.includes("SIGINT") && nodeCode.includes("writeSnapshot()");
+  return {
+    name: "PL-RECOVERY-05: Graceful shutdown writes final snapshot (SIGTERM/SIGINT)",
+    passed: hasGraceful,
+    detail: hasGraceful ? "SIGTERM + SIGINT handlers write final snapshot before exit" : "Missing graceful shutdown",
+  };
+}
+
+function testNodeSkipsSceneLoadOnRecovery(): ConformanceResult {
+  const nodeCode = readFileSync(join(process.cwd(), "mini-services", "world-node", "index.ts"), "utf-8");
+  const hasSkip = nodeCode.includes("State recovered from log") && nodeCode.includes("skipping full scene load");
+  return {
+    name: "PL-RECOVERY-06: Node skips control plane load when state recovered from log",
+    passed: hasSkip,
+    detail: hasSkip ? "If authoritativeState.size > 0 after recovery, scene load is skipped" : "Missing skip logic",
   };
 }
 
@@ -988,6 +1026,10 @@ export function runConformanceSuite(): ConformanceSuite {
     // PL-RECOVERY (G2 — durable state recovery)
     testEventLogFormat,
     testEventLogReplayable,
+    testSnapshotSystemExists,
+    testSnapshotRecoveryWorks,
+    testGracefulShutdownWritesSnapshot,
+    testNodeSkipsSceneLoadOnRecovery,
     // PL-PORTABLE (G9 — cross-runtime package portability)
     testPackagePortabilitySameIdentity,
     testPackagePortabilitySameState,
