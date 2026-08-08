@@ -10,6 +10,7 @@
 
 import { validateDeclarativeArtifact, createDeclarativeImplementation } from "./declarative-artifact";
 import { validateExecutableArtifact } from "./executable-artifact";
+import { certifyArtifact } from "./certification";
 import { isCompatible, PROTOCOL_VERSIONS, versionString } from "./protocol-versions";
 
 export interface ConformanceResult {
@@ -392,6 +393,115 @@ function testExecutableMissingCode(): ConformanceResult {
   };
 }
 
+// ── PL-CERT: Package certification (R2) ───────────────────────────
+
+function testCertificationDeclarative(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/cert-decl",
+    displayName: "Cert Test Declarative",
+    family: "building",
+    capabilities: ["test.cap"],
+    provides: ["test.provides"],
+    requires: [],
+    initialState: {},
+    render: { behavior: "shape", params: { shape: "box", size: 10, color: "#fff" } },
+  };
+  const { certified, record } = certifyArtifact(artifact, "@test/cert-decl");
+  return {
+    name: "PL-CERT-01: Declarative artifact certified",
+    passed: certified && (record.certificationLevel === "verified" || record.certificationLevel === "certified"),
+    detail: `level=${record.certificationLevel}, checks=${record.certificationEvidence.checks.length}`,
+  };
+}
+
+function testCertificationExecutable(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/cert-exec",
+    displayName: "Cert Test Executable",
+    family: "creature",
+    capabilities: ["test.cap"],
+    provides: [],
+    requires: [],
+    initialState: { x: 0 },
+    code: "function userUpdate(d) { state.x += d; }",
+  };
+  const { certified, record } = certifyArtifact(artifact, "@test/cert-exec");
+  return {
+    name: "PL-CERT-02: Executable artifact certified (sandboxed)",
+    passed: certified && record.artifactType === "executable-sandboxed",
+    detail: `level=${record.certificationLevel}, type=${record.artifactType}`,
+  };
+}
+
+function testCertificationMaliciousDenied(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0",
+    name: "@test/cert-malicious",
+    displayName: "Malicious Package",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    code: "function userUpdate() { fetch('https://evil.com'); }",
+  };
+  const { certified, record } = certifyArtifact(artifact, "@test/cert-malicious");
+  return {
+    name: "PL-CERT-03: Malicious package (fetch) denied certification",
+    passed: !certified && record.certificationLevel === "none",
+    detail: `level=${record.certificationLevel}, errors=${record.certificationEvidence.errors.length}`,
+  };
+}
+
+function testCertificationIncompatibleDenied(): ConformanceResult {
+  const artifact = {
+    abiVersion: "3.0.0",
+    name: "@test/cert-incompat",
+    displayName: "Incompatible Package",
+    family: "building",
+    capabilities: [],
+    provides: [],
+    requires: [],
+    initialState: {},
+    render: { behavior: "shape", params: { shape: "box", size: 10, color: "#fff" } },
+  };
+  const { certified, record } = certifyArtifact(artifact, "@test/cert-incompat");
+  return {
+    name: "PL-CERT-04: Incompatible protocol version denied",
+    passed: !certified && record.certificationEvidence.errors.some((e) => e.includes("Protocol")),
+    detail: record.certificationEvidence.errors.join("; "),
+  };
+}
+
+function testCertificationHashUnique(): ConformanceResult {
+  const artifact1 = { abiVersion: "1.0.0", name: "@test/a", displayName: "A", family: "building", capabilities: [], provides: [], requires: [], initialState: {}, render: { behavior: "shape", params: { shape: "box", size: 10, color: "#fff" } } };
+  const artifact2 = { abiVersion: "1.0.0", name: "@test/b", displayName: "B", family: "building", capabilities: [], provides: [], requires: [], initialState: {}, render: { behavior: "shape", params: { shape: "box", size: 10, color: "#fff" } } };
+  const r1 = certifyArtifact(artifact1, "@test/a");
+  const r2 = certifyArtifact(artifact2, "@test/b");
+  return {
+    name: "PL-CERT-05: Content-addressed hash is unique per artifact",
+    passed: r1.record.artifactHash !== r2.record.artifactHash,
+    detail: `${r1.record.artifactHash.slice(0,8)} vs ${r2.record.artifactHash.slice(0,8)}`,
+  };
+}
+
+function testCertificationResourceLimits(): ConformanceResult {
+  const artifact = {
+    abiVersion: "1.0.0", name: "@test/cert-limits", displayName: "Limited", family: "building",
+    capabilities: [], provides: [], requires: [], initialState: {},
+    limits: { maxCpuMs: 8, maxMemoryMb: 5, maxStateKeys: 50, maxUpdateRate: 30 },
+    render: { behavior: "shape", params: { shape: "box", size: 10, color: "#fff" } },
+  };
+  const { certified, record } = certifyArtifact(artifact, "@test/cert-limits");
+  return {
+    name: "PL-CERT-06: Resource limits stored in certification",
+    passed: certified && record.resourceLimits.maxCpuMs === 8 && record.resourceLimits.maxMemoryMb === 5,
+    detail: `cpu=${record.resourceLimits.maxCpuMs}ms, mem=${record.resourceLimits.maxMemoryMb}MB`,
+  };
+}
+
 // ── Run the full suite ────────────────────────────────────────────
 
 export function runConformanceSuite(): ConformanceSuite {
@@ -421,6 +531,13 @@ export function runConformanceSuite(): ConformanceSuite {
     testExecutableEvalBlocked,
     testExecutableImportScriptsBlocked,
     testExecutableMissingCode,
+    // PL-CERT (R2 — package certification)
+    testCertificationDeclarative,
+    testCertificationExecutable,
+    testCertificationMaliciousDenied,
+    testCertificationIncompatibleDenied,
+    testCertificationHashUnique,
+    testCertificationResourceLimits,
   ];
 
   const results = tests.map((test) => {
