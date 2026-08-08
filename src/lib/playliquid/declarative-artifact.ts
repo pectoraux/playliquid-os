@@ -51,6 +51,28 @@ export interface DeclarativeArtifact {
   update?: UpdateBehavior;
   render?: RenderBehavior;
   onClick?: ClickBehavior;
+  // ── Spatial Contract (first-class anchors) ──
+  // Every World Package can declare its spatial contract: anchor points,
+  // bounding volume, connection interfaces, and navigation interfaces.
+  // The World Project Compiler uses these to validate, detect conflicts,
+  // resolve anchors, and build the world + navigation graphs.
+  spatial?: {
+    anchorPoints?: Array<{
+      name: string;
+      position: { x: number; y: number; z: number };
+      direction?: { x: number; y: number; z: number };
+      type?: string; // "connection" | "attachment" | "navigation"
+    }>;
+    boundingVolume?: {
+      minX: number; maxX: number;
+      minY: number; maxY: number;
+      minZ: number; maxZ: number;
+    };
+    connectionInterfaces?: string[]; // e.g. ["road.connect", "navigation.walkable"]
+    navigationInterfaces?: string[]; // e.g. ["walkable", "drivable"]
+    coordinateSystem?: string; // e.g. "cartesian-meters"
+    precision?: string; // "sub-meter" | "meter" | "10-meter" | "100-meter"
+  };
 }
 
 // ── Update behaviors ──────────────────────────────────────────────
@@ -459,6 +481,33 @@ export function validateDeclarativeArtifact(raw: unknown): ArtifactValidationRes
     }
   }
 
+  // Validate spatial contract (anchor-first package design)
+  if (a.spatial) {
+    const s = a.spatial as Record<string, unknown>;
+    if (s.anchorPoints && !Array.isArray(s.anchorPoints)) {
+      errors.push("spatial.anchorPoints must be an array");
+    } else if (Array.isArray(s.anchorPoints)) {
+      for (let i = 0; i < (s.anchorPoints as unknown[]).length; i++) {
+        const ap = (s.anchorPoints as Array<Record<string, unknown>>)[i];
+        if (!ap.name) errors.push(`spatial.anchorPoints[${i}].name is required`);
+        if (!ap.position || typeof ap.position !== "object") errors.push(`spatial.anchorPoints[${i}].position is required`);
+      }
+    }
+    if (s.boundingVolume && typeof s.boundingVolume === "object") {
+      const bv = s.boundingVolume as Record<string, unknown>;
+      const required = ["minX", "maxX", "minY", "maxY", "minZ", "maxZ"];
+      for (const f of required) {
+        if (typeof bv[f] !== "number") errors.push(`spatial.boundingVolume.${f} must be a number`);
+      }
+    }
+    if (s.connectionInterfaces && !Array.isArray(s.connectionInterfaces)) {
+      errors.push("spatial.connectionInterfaces must be an array");
+    }
+    if (s.navigationInterfaces && !Array.isArray(s.navigationInterfaces)) {
+      errors.push("spatial.navigationInterfaces must be an array");
+    }
+  }
+
   if (errors.length > 0) {
     return { valid: false, errors, warnings };
   }
@@ -475,6 +524,7 @@ export function validateDeclarativeArtifact(raw: unknown): ArtifactValidationRes
     update: a.update as UpdateBehavior | undefined,
     render: a.render as RenderBehavior | undefined,
     onClick: a.onClick as ClickBehavior | undefined,
+    spatial: a.spatial as DeclarativeArtifact["spatial"],
   };
 
   return { valid: true, errors, warnings, artifact };

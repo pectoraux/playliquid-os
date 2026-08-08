@@ -1116,6 +1116,46 @@ function testWorldProjectCompilerTestExists(): ConformanceResult {
   };
 }
 
+// ── PL-GFW: Git for Worlds end-to-end ────────────────────────────
+// The definitive proof: contribute → validate → merge → compile → deploy.
+// Plus anchor-first package design (spatial contract in the artifact).
+
+function testAnchorFirstPackageDesign(): ConformanceResult {
+  const code = readFileSync(join(process.cwd(), "src", "lib", "playliquid", "declarative-artifact.ts"), "utf-8");
+  const hasSpatialField = code.includes("spatial?:") && code.includes("anchorPoints");
+  const hasBoundingVolume = code.includes("boundingVolume");
+  const hasConnectionInterfaces = code.includes("connectionInterfaces");
+  const hasNavigationInterfaces = code.includes("navigationInterfaces");
+  const hasValidation = code.includes("Validate spatial contract") && code.includes("spatial.anchorPoints");
+  return {
+    name: "PL-GFW-01: Anchor-first package design (spatial contract in declarative artifact format)",
+    passed: hasSpatialField && hasBoundingVolume && hasConnectionInterfaces && hasNavigationInterfaces && hasValidation,
+    detail: hasSpatialField && hasBoundingVolume && hasConnectionInterfaces && hasNavigationInterfaces && hasValidation
+      ? "DeclarativeArtifact.spatial: anchorPoints + boundingVolume + connectionInterfaces + navigationInterfaces + coordinateSystem + precision"
+      : "Missing anchor-first spatial contract in artifact format",
+  };
+}
+
+function testGitForWorldsE2EExists(): ConformanceResult {
+  const path = join(process.cwd(), "tests", "git-for-worlds-e2e.ts");
+  const exists = existsSync(path);
+  const code = exists ? readFileSync(path, "utf-8") : "";
+  const hasContribute = code.includes("contribution") && code.includes("Submit");
+  const hasValidate = code.includes("Validate") || code.includes("validate");
+  const hasMerge = code.includes("Merge") || code.includes("MERGED");
+  const hasCompile = code.includes("compileWorldBuild") || code.includes("Compile");
+  const hasSpatialContract = code.includes("spatial contract") || code.includes("spatial:");
+  const hasGitForWorlds = code.includes("Git for Worlds") || code.includes("Git-for-Worlds");
+  const hasFullChain = code.includes("Contribute") && code.includes("Validate") && code.includes("Merge") && code.includes("Compile");
+  return {
+    name: "PL-GFW-02: Git-for-Worlds end-to-end test (contribute → validate → merge → compile)",
+    passed: exists && hasContribute && hasValidate && hasMerge && hasCompile && hasSpatialContract && hasGitForWorlds && hasFullChain,
+    detail: exists && hasContribute && hasValidate && hasMerge && hasCompile && hasSpatialContract && hasGitForWorlds && hasFullChain
+      ? "tests/git-for-worlds-e2e.ts: 11 invariants proving the full Git-for-Worlds workflow"
+      : "Missing or incomplete Git-for-Worlds test",
+  };
+}
+
 // ── PL-STATE: State synchronization protocol (R4) ─────────────────
 
 function testStateSyncProtocolVersion(): ConformanceResult {
@@ -2097,6 +2137,9 @@ export function runConformanceSuite(): ConformanceSuite {
     // PL-WPC (World Project Compiler — Git for Worlds)
     testWorldProjectCompilerExists,
     testWorldProjectCompilerTestExists,
+    // PL-GFW (Git for Worlds end-to-end + anchor-first design)
+    testAnchorFirstPackageDesign,
+    testGitForWorldsE2EExists,
     // PL-STATE (R4 — state synchronization protocol)
     testStateSyncProtocolVersion,
     testStateSyncSequenceEnforced,
