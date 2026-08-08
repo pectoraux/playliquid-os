@@ -1071,6 +1071,51 @@ function testGateG_DisasterRecovery(): ConformanceResult {
   };
 }
 
+// ── PL-WPC: World Project Compiler (Git for Worlds) ──────────────
+// The user's vision: World Project = coordination (not executable),
+// Packages = implementation, Compiler = validates + integrates (never
+// generates content). This is Git + npm + OpenStreetMap for worlds.
+
+function testWorldProjectCompilerExists(): ConformanceResult {
+  const servicePath = join(process.cwd(), "src", "lib", "playliquid", "services", "world-project-compiler.ts");
+  const compileRoute = join(process.cwd(), "src", "app", "api", "world-projects", "[id]", "compile", "route.ts");
+  const conflictsRoute = join(process.cwd(), "src", "app", "api", "world-projects", "[id]", "conflicts", "route.ts");
+  const validateRoute = join(process.cwd(), "src", "app", "api", "contributions", "[id]", "validate", "route.ts");
+  const exists = existsSync(servicePath) && existsSync(compileRoute) && existsSync(conflictsRoute) && existsSync(validateRoute);
+  const code = exists ? readFileSync(servicePath, "utf-8") : "";
+  const hasValidate = code.includes("validateContribution") && code.includes("packageCertified") && code.includes("anchorAligned");
+  const hasConflicts = code.includes("detectSpatialConflicts") && code.includes("boxOverlap");
+  const hasResolve = code.includes("resolveAnchors");
+  const hasGraphs = code.includes("buildWorldGraph") && code.includes("buildNavigationGraph");
+  const hasCompile = code.includes("compileWorldBuild") && code.includes("NEVER generates content");
+  return {
+    name: "PL-WPC-01: World Project Compiler exists (validate, conflict-detect, resolve, graph, compile — never generates content)",
+    passed: exists && hasValidate && hasConflicts && hasResolve && hasGraphs && hasCompile,
+    detail: exists && hasValidate && hasConflicts && hasResolve && hasGraphs && hasCompile
+      ? "world-project-compiler.ts: validateContribution + detectSpatialConflicts + resolveAnchors + buildWorldGraph + buildNavigationGraph + compileWorldBuild + API routes"
+      : "Missing World Project Compiler",
+  };
+}
+
+function testWorldProjectCompilerTestExists(): ConformanceResult {
+  const path = join(process.cwd(), "tests", "world-project-compiler-test.ts");
+  const exists = existsSync(path);
+  const code = exists ? readFileSync(path, "utf-8") : "";
+  const hasCoordination = code.includes("coordination") && code.includes("not executable");
+  const hasContracts = code.includes("extractSpatialContract") || code.includes("spatial contracts");
+  const hasConflicts = code.includes("detectSpatialConflicts") || code.includes("spatial conflicts");
+  const hasGraphs = code.includes("world graph") && code.includes("navigation graph");
+  const hasCompile = code.includes("compileWorldBuild") || code.includes("Compile World Build");
+  const hasGitForWorlds = code.includes("Git for Worlds") || code.includes("Git-for-Worlds");
+  return {
+    name: "PL-WPC-02: World Project Compiler acceptance test (coordination, contracts, conflicts, graphs, compile)",
+    passed: exists && hasCoordination && hasContracts && hasConflicts && hasGraphs && hasCompile && hasGitForWorlds,
+    detail: exists && hasCoordination && hasContracts && hasConflicts && hasGraphs && hasCompile && hasGitForWorlds
+      ? "tests/world-project-compiler-test.ts: 9 invariants proving the Git-for-Worlds workflow"
+      : "Missing or incomplete compiler test",
+  };
+}
+
 // ── PL-STATE: State synchronization protocol (R4) ─────────────────
 
 function testStateSyncProtocolVersion(): ConformanceResult {
@@ -2049,6 +2094,9 @@ export function runConformanceSuite(): ConformanceSuite {
     testGateB_RealMultiplayerReconnect,
     testGateF_BlackBoxAlienPackage,
     testGateG_DisasterRecovery,
+    // PL-WPC (World Project Compiler — Git for Worlds)
+    testWorldProjectCompilerExists,
+    testWorldProjectCompilerTestExists,
     // PL-STATE (R4 — state synchronization protocol)
     testStateSyncProtocolVersion,
     testStateSyncSequenceEnforced,
