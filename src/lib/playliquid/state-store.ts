@@ -2,23 +2,32 @@
 // AUTHORITATIVE STATE STORE — the Kernel owns world state
 // ════════════════════════════════════════════════════════════════
 //
-// Phase B: The Kernel is the state authority. Packages define+mutate
-// through KernelContext, but the Kernel owns the canonical state.
-// The browser reads from this authority; it does not own state.
+// R4: The Kernel is the state authority. State is replicated via SSE
+// (read stream) with snapshot+delta protocol. Every state update has
+// a sequence number for ordering and reconnect convergence.
 //
-// This store is an in-memory authoritative state cache per World Build.
-// It's backed by the DB (Persistence) and pushed to clients via SSE
-// (Replication). This is the beginning of the real OS substrate.
+// Protocol:
+//   1. Client connects → receives full snapshot (seq=0)
+//   2. Each mutation → delta update with incrementing seq
+//   3. Client disconnects → reconnects → receives new snapshot
+//   4. Client converges to authoritative state regardless of downtime
+//
+// Sequence numbers are per-build, monotonically increasing.
 
 import { db } from "@/lib/db";
+import { getStateSyncProtocolVersion } from "./protocol-versions";
 
 // In-memory authoritative state per build
-// Key: buildId → Map<entityId, { position, state, updatedAt }>
+// Key: buildId → Map<entityId, { position, state, updatedAt, seq }>
 const authoritativeState = new Map<string, Map<string, {
   position: { x: number; y: number; z: number };
   state: Record<string, unknown>;
   updatedAt: number;
+  seq: number; // R4: per-entity sequence number for ordering
 }>>();
+
+// R4: Per-build global sequence number (for snapshot/delta protocol)
+const buildSequences = new Map<string, number>();
 
 // SSE subscriber connections per build
 // Key: buildId → Set of response writers
@@ -83,6 +92,11 @@ export function mutateEntityState(
     entity.state = { ...entity.state, ...mutation.statePatch };
   }
   entity.updatedAt = Date.now();
+
+  // R4: Increment sequence numbers
+  const buildSeq = (buildSequences.get(buildId) ?? 0) + 1;
+  buildSequences.set(buildId, buildSeq);
+  entity.seq = buildSeq;
 
   // Replicate to all connected clients via SSE
   broadcastStateUpdate(buildId, entityId);
@@ -151,6 +165,9 @@ function broadcastStateUpdate(buildId: string, entityId: string): void {
     entityId,
     position: entity.position,
     state: entity.state,
+    seq: entity.seq,
+    buildSeq: buildSequences.get(buildId) ?? 0,
+    protocolVersion: getStateSyncProtocolVersion(),
     updatedAt: entity.updatedAt,
   });
 

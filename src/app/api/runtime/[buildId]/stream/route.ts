@@ -7,6 +7,7 @@ import {
   subscribe,
   getActiveCells,
 } from "@/lib/playliquid/state-store";
+import { getStateSyncProtocolVersion } from "@/lib/playliquid/protocol-versions";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ buildId: st
         activeCells,
         streaming: hasInterest,
         interestRegion: hasInterest ? { x: parseFloat(x!), z: parseFloat(z!), radius: parseFloat(radius ?? "100") } : null,
+        // R4: State sync protocol version + initial sequence
+        protocolVersion: getStateSyncProtocolVersion(),
+        buildSeq: 0,
       });
       controller.enqueue(encoder.encode(`data: ${snapshot}\n\n`));
 
