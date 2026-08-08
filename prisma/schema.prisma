@@ -2,19 +2,18 @@
 // 10 permanent contracts: Package, Specification, Contract, Entity,
 // WorldProject, WorldBuild, Kernel, RuntimeAdapter, WorldNode, WorldService.
 //
-// NOTE on provider: models use only portable scalar types (String, Int, Float,
-// Boolean, DateTime) so the schema is identical across SQLite (local/sandbox)
-// and PostgreSQL (Neon/Vercel production). To deploy to Neon, change
-// `provider = "sqlite"` → `provider = "postgresql"` and set DATABASE_URL +
-// DIRECT_URL to the Neon connection strings. No model edits are required.
+// Production: Neon PostgreSQL (pooled + direct connection).
+// Local dev: set DATABASE_URL to a SQLite file and change provider to "sqlite"
+// — models use only portable scalar types so no model edits are required.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ════════════════════════════════════════════════════════════════
